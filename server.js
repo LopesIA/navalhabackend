@@ -4,7 +4,7 @@ const admin = require('firebase-admin');
 // Substitua com as suas credenciais do Firebase Admin SDK
 // Você pode obter este arquivo JSON no painel do Firebase, em:
 // Configurações do projeto > Contas de Serviço > Gerar nova chave privada
-const serviceAccount = require('./caminho/para/seu/arquivo.json');
+const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
