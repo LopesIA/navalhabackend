@@ -19,8 +19,7 @@ app.use(express.json());
 
 // Rota para enviar a notificação
 app.post('/enviar-notificacao', (req, res) => {
-  // CORREÇÃO: Usando 'title' e 'body' para corresponder ao front-end
-  const { token, title, body } = req.body;
+  const { token, titulo, corpo } = req.body;
 
   if (!token || !title || !body) {
     return res.status(400).send({
@@ -32,8 +31,8 @@ app.post('/enviar-notificacao', (req, res) => {
   const message = {
     token: token,
     notification: {
-      title: title,
-      body: body
+      title: titulo,
+      body: corpo
     }
   };
 
