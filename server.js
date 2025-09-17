@@ -1,5 +1,6 @@
 const express = require('express');
 const admin = require('firebase-admin');
+const cors = require('cors');
 
 // Substitua com as suas credenciais do Firebase Admin SDK
 // Você pode obter este arquivo JSON no painel do Firebase, em:
@@ -11,6 +12,9 @@ admin.initializeApp({
 });
 
 const app = express();
+
+// Middleware para habilitar o CORS
+app.use(cors());
 app.use(express.json());
 
 // Rota para enviar a notificação
