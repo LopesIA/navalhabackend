@@ -15,9 +15,10 @@ app.use(express.json());
 
 // Rota para enviar a notificação
 app.post('/enviar-notificacao', (req, res) => {
+  // CORREÇÃO: Usando 'title' e 'body' para corresponder ao front-end
   const { token, title, body } = req.body;
 
-  if (!token || !titulo || !corpo) {
+  if (!token || !title || !body) {
     return res.status(400).send({
       success: false,
       message: 'Token, título e corpo são obrigatórios'
@@ -27,8 +28,8 @@ app.post('/enviar-notificacao', (req, res) => {
   const message = {
     token: token,
     notification: {
-      title: titulo,
-      body: corpo
+      title: title,
+      body: body
     }
   };
 
@@ -37,7 +38,8 @@ app.post('/enviar-notificacao', (req, res) => {
       console.log('Mensagem enviada com sucesso:', response);
       res.status(200).send({
         success: true,
-        message: 'Notificação enviada com sucesso!'
+        message: 'Notificação enviada com sucesso!',
+        messageId: response
       });
     })
     .catch((error) => {
