@@ -86,4 +86,8 @@ setInterval(async () => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> 200f99b7f17f294e4cf4d78c32053c7f2b44dcb0
