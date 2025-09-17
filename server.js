@@ -15,7 +15,7 @@ app.use(express.json());
 
 // Rota para enviar a notificação
 app.post('/enviar-notificacao', (req, res) => {
-  const { token, titulo, corpo } = req.body;
+  const { token, title, body } = req.body;
 
   if (!token || !titulo || !corpo) {
     return res.status(400).send({
