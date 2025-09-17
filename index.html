@@ -1,0 +1,3232 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="manifest" href="/manifest.json">
+  <meta charset="UTF-8">
+  <title>💈 Navalha de Ouro</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cor-fundo: #0c0c0c;
+      --cor-card: #181818;
+      --cor-botoes: #222222;
+      --cor-texto-principal: #e0e0e0;
+      --cor-destaque-ouro: #d4af37; /* Dourado */
+      --cor-destaque-prata: #c0c0c0; /* Prateado */
+      --cor-sombra: #000000;
+      --cor-borda: #333;
+    }
+    body.tema-claro {
+      --cor-fundo: #f0f0f0;
+      --cor-card: #ffffff;
+      --cor-botoes: #e0e0e0;
+      --cor-texto-principal: #333;
+      --cor-destaque-ouro: #d4af37;
+      --cor-destaque-prata: #808080;
+      --cor-sombra: #b0b0b0;
+      --cor-borda: #ccc;
+    }
+    body {
+      margin: 0;
+      background: var(--cor-fundo);
+      color: var(--cor-texto-principal);
+      font-family: 'Poppins', sans-serif;
+      min-height: 10vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: background-color 0.3s;
+    }
+    .content-container {
+      width: 100%;
+      max-width: 500px;
+      padding-top: 60px;
+      padding-bottom: 80px; /* Espaço para os botões do rodapé */
+      box-sizing: border-box;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    input, select, button, textarea {
+      width: 100%;
+      margin: 8px 0;
+      padding: 14px;
+      background: var(--cor-botoes);
+      color: var(--cor-texto-principal);
+      border: 1px solid var(--cor-borda);
+      border-radius: 10px;
+      font-size: 16px;
+      transition: all 0.3s ease-in-out;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+      box-sizing: border-box; /* CORREÇÃO: Garante que padding não estoure a div */
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover {
+      background: var(--cor-destaque-ouro);
+      color: var(--cor-fundo);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 10px rgba(212, 175, 55, 0.4);
+    }
+    button:disabled {
+        cursor: not-allowed;
+        background: #444;
+        opacity: 0.6;
+    }
+    .card {
+      background: var(--cor-card);
+      padding: 24px;
+      margin: 12px;
+      border-radius: 16px;
+      box-shadow: 0 6px 15px var(--cor-sombra);
+      width: 90%;
+      max-width: 480px;
+      box-sizing: border-box;
+      animation: fadeIn 0.5s ease-in-out;
+    }
+    .hidden {
+      display: none;
+    }
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: var(--cor-card);
+      color: var(--cor-texto-principal);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16px;
+      box-shadow: 0 2px 4px #000;
+      font-size: 18px;
+      z-index: 10;
+      border-bottom: 2px solid var(--cor-borda);
+    }
+    .logo {
+      font-weight: 600;
+      color: var(--cor-destaque-ouro);
+      font-size: 18px;
+      text-shadow: 0 0 5px var(--cor-destaque-ouro);
+      transition: color 0.3s;
+    }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.85);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      opacity: 0;
+      transition: opacity 0.3s ease-in-out;
+    }
+    .modal.show {
+      display: flex;
+      opacity: 1;
+    }
+    .modal-content {
+      background: var(--cor-card);
+      padding: 30px;
+      border-radius: 20px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.8);
+      transform: scale(0.9);
+      transition: transform 0.3s ease-in-out;
+      border: 1px solid var(--cor-borda);
+    }
+    .modal.show .modal-content {
+      transform: scale(1);
+    }
+    .servico-btn {
+      background: #333;
+      margin: 6px 0;
+      border: 1px solid #555;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: left;
+    }
+    .bottom-buttons-container {
+      position: fixed;
+      bottom: 12px;
+      width: 90%;
+      max-width: 480px;
+      display: flex;
+      justify-content: space-between;
+      z-index: 15;
+    }
+    .bottom-buttons-container button {
+      width: auto;
+    }
+    .redeem-container {
+      position: fixed;
+      bottom: 25px; /* Posição ajustada */
+      width: 100%;
+      max-width: 500px;
+      text-align: center;
+      z-index: 15;
+      box-sizing: border-box;
+    }
+    .redeem-container button {
+      width: 200px;
+      font-size: 14px;
+      padding: 10px;
+      margin: 0;
+    }
+    #btnChat, #btnDenuncia {
+      font-size: 26px;
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      width: auto;
+      height: auto;
+      text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+    }
+    #btnSair {
+      font-size: 20px; /* Reduzido */
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      width: auto;
+      height: auto;
+      text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+      position: fixed;
+      bottom: 72px; /* Posição alterada para ficar acima do botão de denúncia */
+      left: 12px;
+      z-index: 15;
+    }
+    #btnChat {
+      position: fixed;
+      bottom: 12px;
+      right: 12px;
+      z-index: 15;
+    }
+    #btnTema {
+      font-size: 18px; /* Ajuste aqui */
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      cursor: pointer;
+      width: auto;
+      height: auto;
+      text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+    }
+    #btnCarteiraTop {
+      font-size: 16px;
+      background: var(--cor-botoes);
+      color: var(--cor-texto-principal);
+      border-radius: 10px;
+      padding: 8px 12px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    }
+    #botaoExtra {
+      margin: 10px;
+      text-align: center;
+      width: 90%;
+      max-width: 480px;
+      box-sizing: border-box;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+    }
+    .vantagens ul {
+      list-style-type: none;
+      padding: 0;
+    }
+    .vantagens li {
+      background: var(--cor-botoes);
+      margin-bottom: 10px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--cor-borda);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes vip-glow {
+      0% {
+        box-shadow: 0 0 5px var(--cor-destaque-ouro), 0 0 10px var(--cor-destaque-ouro), 0 0 15px var(--cor-destaque-ouro);
+      }
+      50% {
+        box-shadow: 0 0 10px var(--cor-destaque-ouro), 0 0 20px var(--cor-destaque-ouro), 0 0 30px var(--cor-destaque-ouro);
+      }
+      100% {
+        box-shadow: 0 0 5px var(--cor-destaque-ouro), 0 0 10px var(--cor-destaque-ouro), 0 0 15px var(--cor-destaque-ouro);
+      }
+    }
+     @keyframes vaga-glow {
+      0% { box-shadow: 0 0 8px #4CAF50, 0 0 12px #4CAF50; }
+      50% { box-shadow: 0 0 16px #4CAF50, 0 0 24px #4CAF50; }
+      100% { box-shadow: 0 0 8px #4CAF50, 0 0 12px #4CAF50; }
+    }
+    /* NOVO: Animação para o ícone de chat piscando */
+    @keyframes gentle-blink {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.1); }
+    }
+    .blinking-chat {
+        animation: gentle-blink 1.5s ease-in-out infinite;
+    }
+    .vip-glow {
+      animation: vip-glow 2s ease-in-out infinite;
+      border: 2px solid var(--cor-destaque-ouro);
+    }
+    .promocao-card {
+      background: linear-gradient(45deg, #181818, var(--cor-destaque-ouro));
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+    .chat-container {
+      max-height: 300px;
+      overflow-y: auto;
+      border: 1px solid var(--cor-borda);
+      padding: 10px;
+      border-radius: 10px;
+      background: #0d0d0d;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column-reverse; 
+    }
+    .chat-message {
+      padding: 8px;
+      margin-bottom: 5px;
+      border-radius: 8px;
+      animation: fadeIn 0.3s ease-in-out;
+    }
+    .chat-sent {
+      text-align: right;
+      background: #333;
+      margin-left: 20%;
+    }
+    .chat-received {
+      text-align: left;
+      background: #555;
+      margin-right: 20%;
+    }
+    .scrollable-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .aviso-item {
+      text-align: left;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--cor-borda);
+      padding-bottom: 8px;
+      opacity: 0.8;
+      transition: opacity 0.3s ease-in-out;
+    }
+    .horario-btn {
+        background: #222;
+        color: #fff;
+        border: 1px solid #555;
+        border-radius: 5px;
+        padding: 8px;
+        margin: 5px;
+        width: 100px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .horario-btn.selecionado {
+        background: var(--cor-destaque-ouro);
+        color: var(--cor-fundo);
+        border-color: var(--cor-destaque-ouro);
+    }
+    .horarios-actions {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+        gap: 10px;
+    }
+    .horarios-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    .horario-disponivel {
+      background: var(--cor-botoes);
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 14px;
+      color: var(--cor-texto-principal);
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .horario-disponivel:hover {
+      background: var(--cor-destaque-ouro);
+    }
+    .admin-chat {
+      color: var(--cor-destaque-ouro);
+      text-shadow: 0 0 5px var(--cor-destaque-ouro);
+    }
+    .show-password-container {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 100%;
+    }
+    .show-password-container input {
+        padding-right: 40px;
+    }
+    .show-password-toggle {
+        position: absolute;
+        right: 15px;
+        cursor: pointer;
+        color: var(--cor-destaque-prata);
+    }
+    .barbeiro-card {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        cursor: pointer;
+    }
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        border-bottom: 1px solid var(--cor-borda);
+        padding-bottom: 10px;
+    }
+    .card-header-info h4 {
+        margin: 0;
+        font-size: 1.1em;
+        color: var(--cor-destaque-ouro);
+    }
+    .card-header-info p {
+        margin: 4px 0 0;
+        font-size: 0.8em;
+        opacity: 0.8;
+    }
+    .card-reputacao {
+        font-size: 0.9em;
+        text-align: right;
+    }
+    .card-status {
+        padding: 10px;
+        border-radius: 8px;
+        text-align: center;
+        font-weight: 600;
+    }
+    .status-imediato {
+        background-color: #4CAF50;
+        color: white;
+        animation: vaga-glow 1.5s ease-in-out infinite;
+    }
+    .status-manual {
+        background-color: var(--cor-botoes);
+    }
+    .status-indisponivel {
+        background-color: #555;
+        opacity: 0.7;
+    }
+    .card-horarios-disponiveis {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 8px;
+    }
+    .card-horarios-disponiveis span {
+        background: #333;
+        padding: 4px 8px;
+        border-radius: 5px;
+        font-size: 0.85em;
+    }
+    .card-servicos-title {
+        font-size: 0.9em;
+        font-weight: 600;
+        margin-top: 8px;
+        border-top: 1px solid var(--cor-borda);
+        padding-top: 10px;
+    }
+    .card-servicos-list {
+        font-size: 0.8em;
+        opacity: 0.9;
+        list-style-type: none;
+        padding: 0;
+        margin: 0;
+    }
+    .popup-section {
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--cor-borda);
+    }
+    .popup-section h4 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        color: var(--cor-destaque-ouro);
+    }
+    .selectable-item {
+        background: var(--cor-botoes);
+        border: 1px solid var(--cor-borda);
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease-in-out;
+    }
+    .selectable-item:hover {
+        border-color: var(--cor-destaque-ouro);
+    }
+    .selectable-item.selected {
+        background: var(--cor-destaque-ouro);
+        color: var(--cor-fundo);
+        border-color: var(--cor-destaque-ouro);
+        font-weight: 600;
+    }
+    #barbeiroPerfilHorariosList {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        max-height: 150px; /* CORREÇÃO: Adiciona altura máxima e scroll */
+        overflow-y: auto;   /* CORREÇÃO: Adiciona scroll vertical quando necessário */
+    }
+    #barbeiroPerfilHorariosList .selectable-item {
+        flex-grow: 1;
+        text-align: center;
+    }
+    #modalBarbeiroPerfil .modal-footer {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid var(--cor-borda);
+        display: flex;
+        gap: 10px;
+    }
+
+  </style>
+</head>
+<body>
+
+<div class="topbar hidden" id="topbar">
+  <div class="logo">💈 Navalha de Ouro</div>
+  <div class="topbar-right">
+    <button id="btnTema" onclick="alternarTema()">🌙</button>
+    <button id="btnCarteiraTop" class="hidden" onclick="abrirModal('modalCarteira')">💰 R$ <span id="saldoHeader">0,00</span></button>
+  </div>
+</div>
+
+<div class="content-container">
+
+  <div id="botaoExtra" class="hidden"></div>
+
+  <div id="authView" class="card">
+    <h2>🔐 Entrar ou Criar Conta</h2>
+    <input id="email" type="email" placeholder="📧 Email">
+    <input id="senha" type="password" placeholder="🔑 Senha">
+    <div id="cadastro-fields" class="hidden">
+      <div class="show-password-container">
+        <input id="senha-cadastro" type="password" placeholder="🔑 Senha (visível)">
+      </div>
+      <div class="show-password-container">
+        <input id="senha-confirm" type="password" placeholder="🔑 Confirmar Senha (visível)">
+      </div>
+      <select id="tipo">
+        <option value="cliente">🙋 Cliente</option>
+        <option value="barbeiro">💈 Barbeiro</option>
+      </select>
+      <input id="telefone" type="tel" placeholder="📞 Telefone com DDD (ex: 27999999999)">
+      <input id="rua" type="text" placeholder="Endereço (Rua)" class="hidden">
+      <input id="numero" type="text" placeholder="Endereço (Número)" class="hidden">
+      <select id="estado" onchange="carregarCidades()">
+        <option value="">🌎 Selecione seu estado</option>
+      </select>
+      <select id="cidade">
+        <option value="">🏙️ Selecione sua cidade</option>
+      </select>
+      <input id="indicador" type="text" placeholder="📨 Email de quem te indicou? (opcional)">
+    </div>
+    <button onclick="entrar()">➡️ Entrar</button>
+    <button id="btnCriarConta" onclick="prepararCriarConta()">🆕 Criar conta</button>
+    <button id="btnVoltar" class="hidden" onclick="voltarParaLogin()">⬅️ Voltar</button>
+  </div>
+
+  <div id="clienteView" class="hidden card">
+    <h2>🙋 Painel do Cliente</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+      <button onclick="abrirBarbeiros()" style="width:45%">💈 Barbearias</button>
+      <button onclick="abrirHistoricoCliente()" style="width:45%">📜 Histórico</button>
+      <button id="btnVip" onclick="abrirModal('modalVip')" style="width:45%">💎 VIP</button>
+      <button onclick="abrirModal('modalCarteira')" style="width:45%">💰 Carteira</button>
+      <button onclick="abrirChatGlobal()" style="width:45%">💬 Chat</button>
+      <button onclick="abrirModal('modalFidelidade')" style="width:45%">🏆 Fidelidade</button>
+      <button onclick="carregarListaBlog(); abrirModal('modalBlog')" style="width:45%">📰 Blog</button>
+    </div>
+    <div id="conteudoCliente"></div>
+  </div>
+
+  <div id="barbeiroView" class="hidden card">
+    <h2>💈 Painel do Barbeiro</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+      <button onclick="abrirServicos()" style="width:45%">✂️ Serviços</button>
+      <button onclick="abrirAgenda()" style="width:45%">📅 Agenda</button>
+      <button onclick="abrirAgendamentosBarbeiro()" style="width:45%">⏰ Agendamentos</button>
+      <button onclick="abrirClientesBarbeiro()" style="width:45%">🧑‍🤝‍🧑 Clientes</button>
+      <button onclick="abrirFinancasBarbeiro()" style="width:45%">📈 Finanças</button>
+      <button onclick="abrirModal('modalCarteira')" style="width:45%">💰 Carteira</button>
+      <button onclick="abrirPromocoes()" style="width:45%">🎁 Promoções</button>
+      <button onclick="carregarListaBlog(); abrirModal('modalBlog')" style="width:45%">📰 Blog</button>
+      <button onclick="abrirHistoricoBarbeiro()" style="width:45%">📜 Histórico</button>
+      <button onclick="abrirAvaliacoesBarbeiro()" style="width:45%">⭐ Avaliações</button>
+      <button onclick="abrirModal('modalAlterarNomeBarbeiro')" style="width:45%">✏️ Alterar Nome</button>
+    </div>
+    <div id="conteudoBarbeiro"></div>
+  </div>
+
+  <div id="adminView" class="hidden card">
+    <h2>🧠 Painel do Admin</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+      <button onclick="abrirModalEstatisticas()" style="width:45%">📊 Estatísticas</button>
+      <button onclick="abrirModalSolicitacoes()" style="width:45%">📥 Solicitações</button>
+      <button onclick="abrirModalUsuarios()" style="width:45%">👥 Usuários</button>
+      <button onclick="abrirDenuncias()" style="width:45%">🚨 Denúncias</button>
+      <button onclick="abrirModal('modalCarteira')" style="width:45%">💰 Carteira</button>
+      <button onclick="abrirModal('modalBlogAdmin')" style="width:45%">✍️ Publicar Blog</button>
+    </div>
+    <div id="conteudoAdmin"></div>
+  </div>
+
+</div>
+
+<div class="redeem-container hidden" id="redeemContainer">
+  <button id="btnResgatar" onclick="abrirPortaSecreta()">✨ Resgatar Código</button>
+</div>
+
+<div class="bottom-buttons-container hidden" id="bottomButtons">
+  <button id="btnDenuncia" onclick="abrirModal('modalDenuncia')">🚨</button>
+  <button id="btnChat" onclick="abrirChatGlobal()">💬</button>
+</div>
+
+<button id="btnSair" class="hidden" onclick="auth.signOut()">Sair</button>
+
+<div id="modalCarteira" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>💰 Carteira</h3>
+    <p>📌 Todos os pagamentos são feitos via Pix.<br>
+    O saldo é liberado após confirmação manual.</p>
+    <p>🔑 Chave Pix:<br>📇 CPF: 18912553712<br>👤 Nome: JOSIEL LOPES AZEREDO</p>
+    <button onclick="solicitarDeposito()">📥 Solicitar depósito</button>
+    <button onclick="solicitarSaque()">📤 Solicitar saque</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalDeposito" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>✅ Solicitação Enviada!</h3>
+    <p>Aguarde a confirmação para o valor ser creditado na sua carteira.</p>
+    <a id="btnWhatsappDeposito" href="#" target="_blank">
+      <button>💬 Avisar no WhatsApp</button>
+    </a>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalSaqueEnviado" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>✅ Solicitação de Saque Enviada!</h3>
+    <p>Sua solicitação está sendo analisada.<br>Para agilizar, envie uma mensagem para o administrador no WhatsApp.</p>
+    <a id="btnWhatsappSaque" href="#" target="_blank">
+      <button>💬 Acelerar via WhatsApp</button>
+    </a>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalVip" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content vip-glow" onclick="event.stopPropagation()">
+    <div id="vipContent">
+        <h3>💎 Vantagens VIP</h3>
+        <p>Adesão: R$ 100,00</p>
+        <p style="font-size: 14px; color: var(--cor-destaque-prata);">✨ Sua adesão é um apoio vital para a continuação e desenvolvimento deste projeto. O valor será totalmente investido em melhorias e na expansão do aplicativo.</p>
+        <div class="vantagens">
+            <h4>Vantagens para Cliente VIP:</h4>
+            <ul>
+                <li>👑 Desconto de 10% em todos os serviços.</li>
+                <li>✨ Atendimento prioritário.</li>
+            </ul>
+        </div>
+        <button onclick="assinarVip()">Assinar VIP</button>
+    </div>
+    <div id="vipContentAtivo" class="hidden">
+        <h3>👑 Agora você é VIP!</h3>
+        <p style="font-size: 14px; color: var(--cor-destaque-prata);">Aproveite os benefícios exclusivos e os descontos de 10% em todos os serviços.</p>
+        <div class="vantagens">
+            <h4>Vantagens para Cliente VIP:</h4>
+            <ul>
+                <li>👑 Desconto de 10% em todos os serviços.</li>
+                <li>✨ Atendimento prioritário.</li>
+            </ul>
+        </div>
+    </div>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalFidelidade" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>🏆 Programa de Fidelidade</h3>
+    <p>Seus pontos: <b id="pontosFidelidade">0</b></p>
+    <p style="font-size: 14px; color: var(--cor-destaque-prata);">Acumule pontos em cada agendamento e troque por descontos!</p>
+    <button onclick="resgatarPontos()">🎁 Resgatar 100 pontos por R$ 5,00</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="janelaChat" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3 id="chatTitle">💬 Chat Global</h3>
+    <div id="chatMessages" class="chat-container"></div>
+    <input id="chatInput" placeholder="Digite sua mensagem">
+    <button onclick="enviarMensagem()">Enviar</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalDenuncia" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>🚨 Denunciar</h3>
+    <p>Envie sua mensagem e o administrador responderá em breve!</p>
+    <textarea id="textoDenuncia" placeholder="Descreva o problema em detalhes"></textarea>
+    <button onclick="enviarDenuncia()">➡️ Enviar</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalDenunciaEnviada" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>✅ Denúncia Enviada!</h3>
+    <p>Agradecemos a sua denúncia. Ela será analisada pela nossa equipe.</p>
+    <p>💬 Se preferir, clique no botão abaixo para avisar o administrador diretamente no WhatsApp e agilizar o processo.</p>
+    <a id="btnWhatsappDenuncia" href="#" target="_blank">
+      <button>💬 Avisar no WhatsApp</button>
+    </a>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalBarbeiroPerfil" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <div id="barbeiroPerfilHeader">
+        <h3 id="barbeiroPerfilNome"></h3>
+        <p>Endereço: <span id="barbeiroPerfilEndereco"></span></p>
+        <p>Reputação: <span id="barbeiroPerfilReputacao"></span></p>
+    </div>
+    
+    <div id="barbeiroPerfilServicos" class="popup-section">
+        <h4>1. Escolha um Serviço</h4>
+        <div id="barbeiroPerfilServicosList" class="scrollable-list" style="max-height: 150px;"></div>
+    </div>
+    
+    <div id="barbeiroPerfilHorarios" class="popup-section">
+        <h4>2. Escolha uma Opção</h4>
+        <div id="barbeiroPerfilHorariosList"></div>
+    </div>
+    
+    <div class="modal-footer">
+        <button id="btnConfirmarAgendamento" disabled>Agendar</button>
+        <button onclick="fecharModal(event)">❌ Fechar</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="modalCriarPromocao" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>🎁 Criar Promoção</h3>
+    <input id="promocaoNome" placeholder="Nome da Promoção">
+    <input id="promocaoDescricao" placeholder="Descrição curta">
+    <input type="number" id="promocaoDesconto" placeholder="Desconto em % (ex: 15)">
+    <button onclick="criarPromocao()">Salvar Promoção</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalBlog" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>📰 Blog</h3>
+    <div id="listaBlog" class="scrollable-list"></div>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalBlogAdmin" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>✍️ Novo Post</h3>
+    <input id="blogTitulo" placeholder="Título">
+    <textarea id="blogConteudo" placeholder="Conteúdo do post"></textarea>
+    <button onclick="publicarBlog()">Publicar</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalEstatisticas" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>📊 Estatísticas</h3>
+    <div id="estatisticasPainel" class="scrollable-list"></div>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalSolicitacoes" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>📥 Todas as Solicitações</h3>
+    <div id="listaSolicitacoes" class="scrollable-list"></div>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalUsuarios" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>👥 Todos os Usuários</h3>
+    <div id="usuariosPainel" class="scrollable-list"></div>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalAlterarNomeBarbeiro" class="modal" onclick="fecharModal(event)">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <h3>✏️ Alterar Nome</h3>
+    <input id="novoNomeBarbeiro" type="text" placeholder="Novo nome do barbeiro/barbearia">
+    <button onclick="alterarNomeBarbeiro(event)">Salvar</button>
+    <button onclick="fecharModal(event)">❌ Fechar</button>
+  </div>
+</div>
+
+<div id="modalAvaliacoes" class="modal" onclick="fecharModal(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+        <h3>⭐ Minhas Avaliações</h3>
+        <div id="listaAvaliacoesModal" class="scrollable-list"></div>
+        <button onclick="fecharModal(event)">❌ Fechar</button>
+    </div>
+</div>
+
+<div id="modalVagaImediataAprovada" class="modal" style="z-index: 99;">
+    <div class="modal-content" style="background: #e74c3c; color: white;" onclick="event.stopPropagation()">
+        <h3 style="color:white;text-shadow: 2px 2px 4px #000;">⚠️ VAGA IMEDIATA APROVADA!</h3>
+        <p style="font-size: 1.2em; text-align: center;"><b>Você tem 10 minutos para chegar à barbearia.</b></p>
+        <p style="text-align: center;">Não se atrase para não perder a vaga e o seu dinheiro!</p>
+        <div style="display:flex; gap: 10px; margin-top: 20px;">
+            <button onclick="fecharModal({ target: this.closest('.modal') })" style="background:white; color:#e74c3c; flex: 1;">Entendi</button>
+            <button id="btnCancelarVagaAprovada" style="background: #333; color: white; flex: 1;">Cancelar Agendamento</button>
+        </div>
+    </div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.0.1/firebase-messaging-compat.js"></script> <script>
+// Firebase e variáveis globais
+const firebaseConfig = {
+  apiKey: "AIzaSyDBt7NcU5rP-hsrBZ07ne_HbiMCHRyVcnY",
+  authDomain: "navalha-de-ouro-v11.firebaseapp.com",
+  projectId: "navalha-de-ouro-v11",
+  storageBucket: "navalha-de-ouro-v11.firebasestorage.app",
+  messagingSenderId: "434474263075",
+  appId: "1:434474263075:web:163893d68a1b5dbe74c796"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth(), db = firebase.firestore();
+// Este código força o Firebase a "lembrar" do usuário mesmo se o app for fechado.
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+  .then(() => {
+    console.log("Persistência de autenticação definida para 'local'. O usuário ficará logado.");
+  })
+  .catch((error) => {
+    console.error("Erro ao definir a persistência de autenticação:", error);
+  });
+const messaging = firebase.messaging(); // NOVO: Inicializa o serviço de Messaging
+const ADMIN_EMAIL = "josiel70c@gmail.com", ADMIN_PASS = "Ja997640401", TAXA = 0.05, BONUS_INDICACAO = 100, PONTOS_POR_CORTE = 10, PONTOS_PARA_RESGATE = 100, VALOR_RESGATE = 5;
+const PONTOS_POR_DEPOSITO_NORMAL = 4, PONTOS_POR_DEPOSITO_VIP = 8;
+const WHATSAPP_ADM_PHONE = "5527995003737";
+const PRECO_VIP = 100;
+let isSending = false;
+let perfil = null;
+let agendamentoListener = null;
+let currentModal = null;
+let chatListener = null;
+let barbeirosListener = null;
+let tempSelectedHorarios = {};
+const CHAT_GLOBAL_ID = "chatGlobal";
+let botInterval = null;
+
+let userView = {
+    originalType: null,
+    currentType: null
+};
+
+let agendamentoState = {
+    barbeiroUid: null,
+    barbeiroNome: null,
+    servico: null,
+    horario: null, 
+};
+
+let adminBalanceListener = null;
+let adminUserBalances = {};
+// NOVO: Listener global de chat e controle de timestamp
+let globalChatListener = null;
+let lastGlobalMessageTimestamp = null;
+
+// INÍCIO: NOVAS FUNÇÕES DE NOTIFICAÇÃO
+/**
+ * Função principal para enviar uma notificação via backend.
+ * @param {string} token - O token FCM do dispositivo de destino.
+ * @param {string} title - O título da notificação.
+ * @param {string} body - O corpo da mensagem da notificação.
+ */
+async function sendNotification(token, title, body) {
+  const backendUrl = "https://navalhabackend-2.onrender.com/sendNotification";
+  if (!token) {
+      console.error("Tentativa de enviar notificação sem um token.");
+      return;
+  }
+  try {
+    // O cabeçalho 'Content-Type' é crucial para o backend entender o formato dos dados.
+    const response = await fetch(backendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token: token,
+        title: title,
+        body: body,
+      }),
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      console.log('Notificação enviada com sucesso:', data.messageId);
+    } else {
+      console.error('Falha ao enviar a notificação:', data.error);
+    }
+  } catch (error) {
+    console.error('Erro de rede ou na chamada da API de notificação:', error);
+  }
+}
+
+/**
+ * Função auxiliar para buscar os tokens de um usuário e enviar a notificação.
+ * @param {string} uid - O ID do usuário a ser notificado.
+ * @param {string} title - O título da notificação.
+ * @param {string} body - O corpo da mensagem da notificação.
+ */
+async function notifyUser(uid, title, body) {
+    if (!uid) return;
+    try {
+        const userDoc = await db.collection("usuarios").doc(uid).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            // Verifica se o usuário tem tokens antes de tentar enviar.
+            if (userData.fcmTokens && userData.fcmTokens.length > 0) {
+                // Envia a notificação para cada token que o usuário possui.
+                userData.fcmTokens.forEach(token => {
+                    sendNotification(token, title, body);
+                });
+            }
+        }
+    } catch (error) {
+        console.error("Erro ao buscar tokens do usuário para notificação:", error);
+    }
+}
+
+/**
+ * Função auxiliar para notificar todos os administradores.
+ * @param {string} title - O título da notificação.
+ * @param {string} body - O corpo da mensagem da notificação.
+ */
+async function notifyAdmins(title, body) {
+    try {
+        const adminQuery = await db.collection("usuarios").where("tipo", "==", "admin").get();
+        if (!adminQuery.empty) {
+            adminQuery.forEach(adminDoc => {
+                const adminData = adminDoc.data();
+                if (adminData.fcmTokens && adminData.fcmTokens.length > 0) {
+                    adminData.fcmTokens.forEach(token => {
+                        sendNotification(token, title, body);
+                    });
+                }
+            });
+        }
+    } catch(e) {
+        console.error("Erro ao notificar admins:", e);
+    }
+}
+// FIM: NOVAS FUNÇÕES DE NOTIFICAÇÃO
+
+
+// Funções de UI
+function mostrar(id) {
+  ["authView", "clienteView", "barbeiroView", "adminView"].forEach(v => document.getElementById(v)?.classList.add("hidden"));
+  document.getElementById(id)?.classList.remove("hidden");
+  document.getElementById("topbar").classList.toggle("hidden", id === "authView");
+  document.getElementById("bottomButtons").classList.toggle("hidden", id === "authView");
+  document.getElementById("redeemContainer").classList.toggle("hidden", id === "authView");
+  document.getElementById("btnTema").classList.toggle("hidden", id === "authView");
+  document.getElementById("btnCarteiraTop").classList.toggle("hidden", id === "authView");
+  document.getElementById("botaoExtra").classList.toggle("hidden", id === "authView");
+  document.getElementById("btnSair").classList.toggle("hidden", id === "authView");
+}
+
+function fecharModal(event) {
+    if (event.target.classList.contains('modal') || event.target.tagName === 'BUTTON' || event.target.closest('button')) {
+        const modal = event.target.closest('.modal');
+        if (modal) {
+            modal.classList.remove("show");
+            currentModal = null;
+            if (chatListener) {
+              chatListener();
+              chatListener = null;
+            }
+            if (modal.id === 'janelaChat' && botInterval) {
+                clearInterval(botInterval);
+                botInterval = null;
+            }
+        }
+    }
+}
+
+
+function abrirModal(id) {
+    const modal = document.getElementById(id);
+    if (modal) {
+        if (id === 'modalVip') {
+            const vipContent = document.getElementById('vipContent');
+            const vipContentAtivo = document.getElementById('vipContentAtivo');
+            if (perfil.vip) {
+                vipContent.classList.add('hidden');
+                vipContentAtivo.classList.remove('hidden');
+            } else {
+                vipContent.classList.remove('hidden');
+                vipContentAtivo.classList.add('hidden');
+            }
+        }
+        if (id === 'modalFidelidade') {
+            document.getElementById('pontosFidelidade').textContent = perfil.pontosFidelidade;
+        }
+        modal.classList.add("show");
+        currentModal = modal;
+    }
+}
+
+function alternarTema() {
+  const body = document.body;
+  const isLight = body.classList.toggle('tema-claro');
+  document.getElementById('btnTema').textContent = isLight ? '☀️' : '🌙';
+}
+
+function setupViewSwitcher() {
+    const container = document.getElementById("botaoExtra");
+    container.innerHTML = "";
+    if (!userView.originalType) return;
+
+    const createButton = (text, view) => {
+        const btn = document.createElement("button");
+        btn.textContent = text;
+        btn.onclick = () => switchView(view);
+        if (userView.currentType === view) {
+            btn.style.borderColor = "var(--cor-destaque-ouro)";
+            btn.disabled = true;
+        }
+        container.appendChild(btn);
+    };
+
+    if (userView.originalType === 'admin') {
+        createButton("🧠 Admin", "admin");
+        createButton("💈 Barbeiro", "barbeiro");
+        createButton("🙋 Cliente", "cliente");
+    } else if (userView.originalType === 'barbeiro') {
+        createButton("💈 Barbeiro", "barbeiro");
+        createButton("🙋 Cliente", "cliente");
+    }
+}
+
+function switchView(view) {
+    userView.currentType = view;
+    renderCurrentView();
+}
+
+function renderCurrentView() {
+    setupViewSwitcher();
+    if (adminBalanceListener) {
+        adminBalanceListener();
+        adminBalanceListener = null;
+    }
+
+    switch (userView.currentType) {
+        case 'admin':
+            mostrar("adminView");
+            carregarAdmin();
+            break;
+        case 'barbeiro':
+            mostrar("barbeiroView");
+            carregarBarbeiro();
+            break;
+        case 'cliente':
+            mostrar("clienteView");
+            carregarCliente();
+            break;
+        default:
+            mostrar("authView");
+    }
+}
+
+
+// Estados e cidades do Brasil
+const cidadesPorEstado = {
+  "ES": ["Aracruz", "Vitória", "Serra", "Linhares", "Colatina", "Cachoeiro de Itapemirim", "Guarapari", "Vila Velha", "São Mateus", "Barra de São Francisco"],
+  "SP": ["São Paulo", "Campinas", "Santos", "Ribeirão Preto", "Sorocaba"],
+  "RJ": ["Rio de Janeiro", "Niterói", "Petrópolis", "Volta Redonda", "Campos dos Goytacazes"],
+  "MG": ["Belo Horizonte", "Uberlândia", "Contagem", "Juiz de Fora", "Montes Claros"],
+  "BA": ["Salvador", "Feira de Santana", "Vitória da Conquista", "Ilhéus", "Barreiras"],
+  "PR": ["Curitiba", "Londrina", "Maringá", "Cascavel", "Ponta Grossa"],
+  "RS": ["Porto Alegre", "Caxias do Sul", "Pelotas", "Santa Maria", "Novo Hamburgo"],
+  "SC": ["Florianópolis", "Joinville", "Blumenau", "Chapecó", "Criciúma"],
+  "PE": ["Recife", "Olinda", "Caruaru", "Petrolina", "Garanhuns"],
+  "CE": ["Fortaleza", "Juazeiro do Norte", "Sobral", "Crato", "Iguatu"],
+  "DF": ["Brasília"]
+};
+
+function carregarEstados() {
+  const estadoSelect = document.getElementById("estado");
+  estadoSelect.innerHTML = '<option value="">🌎 Selecione seu estado</option>';
+  Object.keys(cidadesPorEstado).forEach(sigla => {
+    estadoSelect.innerHTML += `<option value="${sigla}">${sigla}</option>`;
+  });
+}
+
+function carregarCidades() {
+  const estado = document.getElementById("estado").value;
+  const cidadeSelect = document.getElementById("cidade");
+  cidadeSelect.innerHTML = '<option value="">🏙️ Selecione sua cidade</option>';
+  const cidades = cidadesPorEstado[estado] || [];
+  cidades.forEach(c => {
+    cidadeSelect.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+}
+
+carregarEstados();
+
+// Funções de Autenticação
+function entrar() {
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha").value.trim();
+  if (!email || !senha) return alert("Preencha os campos corretamente.");
+  auth.signInWithEmailAndPassword(email, senha)
+    .then(() => console.log("Login OK"))
+    .catch(e => alert("Erro ao entrar: " + e.message));
+}
+
+function prepararCriarConta() {
+    const email = document.getElementById("email").value.trim();
+    const senha = document.getElementById("senha").value.trim();
+  
+    if (!email || !senha) return alert("Por favor, preencha o email e a senha para começar o cadastro.");
+  
+    document.getElementById("email").classList.add("hidden");
+    document.getElementById("senha").classList.add("hidden");
+    document.querySelector("#authView button:first-of-type").style.display = "none";
+    document.getElementById("cadastro-fields").classList.remove("hidden");
+  
+    document.getElementById("senha-cadastro").value = senha;
+  
+    document.getElementById("btnCriarConta").onclick = criarConta;
+    document.getElementById("btnCriarConta").textContent = "🆕 Criar Conta";
+    
+    document.getElementById("btnVoltar").classList.remove("hidden");
+    
+    document.getElementById("senha-cadastro").type = "text";
+    document.getElementById("senha-confirm").type = "text";
+}
+
+function voltarParaLogin() {
+    document.getElementById("cadastro-fields").classList.add("hidden");
+    document.getElementById("btnVoltar").classList.add("hidden");
+    
+    document.getElementById("email").classList.remove("hidden");
+    document.getElementById("senha").classList.remove("hidden");
+    document.querySelector("#authView button:first-of-type").style.display = "block";
+    
+    document.getElementById("btnCriarConta").onclick = prepararCriarConta;
+    document.getElementById("btnCriarConta").textContent = "🆕 Criar conta";
+    
+    document.getElementById("senha-cadastro").value = "";
+    document.getElementById("senha-confirm").value = "";
+
+    document.getElementById("senha-cadastro").type = "password";
+    document.getElementById("senha-confirm").type = "password";
+}
+
+function criarConta() {
+  const email = document.getElementById("email").value.trim();
+  const senha = document.getElementById("senha-cadastro").value;
+  const senhaConfirm = document.getElementById("senha-confirm").value;
+  const tipo = document.getElementById("tipo").value;
+  const telefone = document.getElementById("telefone").value.trim();
+  const estado = document.getElementById("estado").value;
+  const cidade = document.getElementById("cidade").value;
+  const nome = prompt("📝 Escolha seu nome:");
+  const indicadorEmail = document.getElementById("indicador").value.trim();
+  let rua, numero;
+
+  if (tipo === 'barbeiro') {
+    rua = document.getElementById("rua").value.trim();
+    numero = document.getElementById("numero").value.trim();
+  }
+
+  if (senha !== senhaConfirm) {
+    return alert("As senhas não coincidem. Por favor, tente novamente.");
+  }
+
+  if (!telefone || telefone.length < 11 || !/^\d+$/.test(telefone)) {
+    return alert("Por favor, insira um telefone válido com DDD (mínimo 11 dígitos).");
+  }
+
+  if (!email || !senha || !nome || (email !== ADMIN_EMAIL && (!estado || !cidade))) {
+    return alert("Preencha todos os campos obrigatórios");
+  }
+  const tipoFinal = email === ADMIN_EMAIL ? "admin" : tipo;
+  const estadoFinal = email === ADMIN_EMAIL ? "todos" : estado;
+  const cidadeFinal = email === ADMIN_EMAIL ? "todos" : cidade;
+  
+  auth.createUserWithEmailAndPassword(email, senha)
+    .then(async cred => {
+      const data = {
+        email, nome, tipo: tipoFinal, telefone, estado: estadoFinal, cidade: cidadeFinal,
+        saldo: 0, reputacao: 100, cortesSemana: 0,
+        disponivel: "nao", listaServicos: [], promocoes: [],
+        chatAtivo: true, vip: false,
+        rua: rua || null, numero: numero || null, usaAgendaManual: false, agenda: {}, pontosFidelidade: 0,
+        codigosResgatados: [],
+        indicadoPorEmail: indicadorEmail || null,
+        bonusIndicacaoPendente: !!indicadorEmail,
+        fcmTokens: [] // NOVO: Campo para armazenar tokens de notificação
+      };
+      await db.collection("usuarios").doc(cred.user.uid).set(data);
+      // NOTIFICAÇÃO
+      notifyAdmins("🆕 Novo Cadastro!", `O usuário ${nome} (${tipoFinal}) acabou de se registrar.`);
+    })
+    .catch(e => alert("Erro ao criar conta: " + e.message));
+}
+
+document.getElementById('tipo').addEventListener('change', (e) => {
+  const isBarbeiro = e.target.value === 'barbeiro';
+  document.getElementById('rua').classList.toggle('hidden', !isBarbeiro);
+  document.getElementById('numero').classList.toggle('hidden', !isBarbeiro);
+});
+
+auth.onAuthStateChanged(async user => {
+  if (!user) {
+    userView = { originalType: null, currentType: null };
+    renderCurrentView();
+    document.getElementById("btnSair").classList.add("hidden");
+    document.getElementById("redeemContainer").classList.add("hidden");
+    if(globalChatListener) globalChatListener(); // Desativa o listener de chat ao sair
+    return;
+  }
+  const ref = db.collection("usuarios").doc(user.uid);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    mostrar("authView");
+    return;
+  }
+  perfil = snap.data();
+  db.collection("usuarios").doc(user.uid).onSnapshot(s => {
+    perfil = s.data(); 
+    document.getElementById("saldoHeader").textContent = (s.data().saldo || 0).toFixed(2);
+    const btnVip = document.getElementById('btnVip');
+    if (s.data().vip) {
+      btnVip.textContent = '👑 Sou VIP';
+      btnVip.classList.add('vip-glow');
+    } else {
+      btnVip.textContent = '💎 VIP';
+      btnVip.classList.remove('vip-glow');
+    }
+  });
+
+  const config = await db.collection("config").doc("sistema").get();
+  if (config.exists && config.data().ativo === false && perfil.tipo !== "admin") {
+    alert("🚧 Sistema em manutenção");
+    auth.signOut();
+    return;
+  }
+  
+  userView.originalType = perfil.tipo;
+  userView.currentType = perfil.tipo;
+  renderCurrentView();
+
+  // NOVO: Chama a função para configurar as notificações
+  setupFCM(user.uid);
+
+  setTimeout(() => {
+    document.getElementById("btnSair").classList.remove("hidden");
+  }, 15000);
+
+  db.collection("avisos").where("usuarioUid", "==", user.uid).where("lido", "==", false)
+    .onSnapshot(snapshot => {
+        snapshot.docChanges().forEach(change => {
+            if (change.type === "added") {
+                const aviso = change.doc.data();
+                if (aviso.tipo === 'vaga-aprovada' && aviso.agendamentoId) {
+                    abrirModalVagaAprovada(aviso.agendamentoId);
+                } else {
+                    alert(`🔔 Novo Aviso: ${aviso.mensagem}`);
+                }
+                change.doc.ref.update({ lido: true });
+            }
+        });
+    });
+
+    // NOVO: Listener de chat global para notificação piscante
+    if (globalChatListener) globalChatListener(); // Garante que não haja listeners duplicados
+    globalChatListener = db.collection("chats").doc(CHAT_GLOBAL_ID).collection("mensagens")
+        .orderBy("ts", "desc").limit(1)
+        .onSnapshot(snapshot => {
+            if (snapshot.empty) return;
+            const msg = snapshot.docs[0].data();
+            const janelaChat = document.getElementById('janelaChat');
+            
+            // Verifica se a mensagem é nova, não é do próprio usuário e se o chat está fechado
+            if (msg.ts?.seconds > (lastGlobalMessageTimestamp?.seconds || 0) &&
+                msg.remetenteUid !== user.uid && 
+                !janelaChat.classList.contains('show')) {
+                document.getElementById('btnChat').classList.add('blinking-chat');
+            }
+            lastGlobalMessageTimestamp = msg.ts;
+        });
+});
+
+async function abrirPortaSecreta() {
+  const codigo = prompt("💎 Insira o código de resgate:");
+  if (!codigo) return;
+
+  if (codigo === "Ja997640401") {
+    if (perfil.tipo === "admin") return alert("Sua conta já é de administrador.");
+    
+    await db.collection("usuarios").doc(auth.currentUser.uid).update({ tipo: "admin" });
+    alert("🔑 Sua conta agora é de Administrador! A página será recarregada.");
+    location.reload();
+    return;
+  }
+
+  if (codigo.startsWith("(") && codigo.endsWith(")")) {
+    if (perfil.codigosResgatados && perfil.codigosResgatados.includes(codigo)) {
+        return alert("Você já resgatou este código.");
+    }
+
+    const blogPosts = await db.collection("blog").get();
+    let codigoValido = false;
+    blogPosts.forEach(doc => {
+        const post = doc.data();
+        if (post.conteudo && post.conteudo.includes(codigo)) {
+            codigoValido = true;
+        }
+    });
+
+    if (codigoValido) {
+        await db.collection("usuarios").doc(auth.currentUser.uid).update({
+            pontosFidelidade: firebase.firestore.FieldValue.increment(5),
+            codigosResgatados: firebase.firestore.FieldValue.arrayUnion(codigo)
+        });
+        alert("🎉 Código válido! Você ganhou 5 pontos de fidelidade.");
+        // NOTIFICAÇÃO
+        notifyUser(auth.currentUser.uid, "🏆 Pontos de Fidelidade!", "Você ganhou 5 pontos por resgatar um código do blog!");
+    } else {
+        alert("Código inválido ou expirado.");
+    }
+  } else {
+    alert("Código inválido!");
+  }
+}
+
+function carregarCliente() {
+  document.getElementById("conteudoCliente").innerHTML = "<p>👈 Escolha uma opção acima</p>";
+  document.getElementById("redeemContainer").classList.remove("hidden");
+  setTimeout(() => {
+    document.getElementById("redeemContainer").classList.add("hidden");
+  }, 14000); 
+}
+
+function abrirBarbeiros() {
+  document.getElementById("conteudoCliente").innerHTML = `
+    <h3>💈 Barbearias disponíveis</h3>
+    <input type="text" id="filtroBarbeiro" onkeyup="filtrarBarbeiros()" placeholder="Buscar por barbeiro ou cidade...">
+    <div id='listaBarbeiros' class="scrollable-list"></div>
+  `;
+  carregarBarbeirosPorCidade();
+}
+
+function filtrarBarbeiros() {
+  const termo = document.getElementById("filtroBarbeiro").value.toLowerCase();
+  const barbeiros = document.querySelectorAll("#listaBarbeiros .card");
+  barbeiros.forEach(card => {
+    const nome = card.querySelector("h4").textContent.toLowerCase();
+    const cidade = card.querySelector(".card-header-info p").textContent.toLowerCase();
+    if (nome.includes(termo) || cidade.includes(termo)) {
+      card.style.display = "flex";
+    } else {
+      card.style.display = "none";
+    }
+  });
+}
+
+function carregarBarbeirosPorCidade() {
+  const lista = document.getElementById("listaBarbeiros");
+  lista.innerHTML = "<p>⏳ Carregando barbeiros...</p>";
+  
+  if (barbeirosListener) barbeirosListener(); 
+
+  let query = db.collection("usuarios").where("tipo", "==", "barbeiro");
+  if (perfil.estado && perfil.cidade) {
+      query = query.where("estado", "==", perfil.estado).where("cidade", "==", perfil.cidade);
+  }
+
+  barbeirosListener = query.onSnapshot(snap => {
+    lista.innerHTML = "";
+    if (snap.empty) {
+      lista.innerHTML = "<p>😔 Nenhum barbeiro disponível na sua cidade. Por favor, cheque com o administrador.</p>";
+      return;
+    }
+    snap.forEach(doc => {
+      const b = doc.data();
+      const reputacaoEstrelas = '⭐'.repeat(Math.round((b.reputacao || 100) / 20));
+      const promocoes = b.promocoes || [];
+      const promosHtml = promocoes.map(p => `<div class="promocao-card">🎁 ${p.desconto}% OFF - ${p.nome}</div>`).join('');
+      
+      let statusHtml = '';
+      if (b.vagaImediata) {
+          statusHtml = `<div class="card-status status-imediato">⚡ Vaga Imediata Disponível!</div>`;
+      } else if (b.usaAgendaManual) {
+          const horarios = Object.keys(b.agenda || {}).filter(h => b.agenda[h]).sort();
+          if (horarios.length > 0) {
+              statusHtml = `
+                  <div class="card-status status-manual">
+                      📅 Agende seu horário
+                      <div class="card-horarios-disponiveis">
+                          ${horarios.map(h => `<span>${h}</span>`).join('')}
+                      </div>
+                  </div>`;
+          } else {
+              statusHtml = `<div class="card-status status-indisponivel">📋 Agenda manual (sem horários hoje)</div>`;
+          }
+      } else {
+          statusHtml = `<div class="card-status status-indisponivel">🔴 Indisponível no momento</div>`;
+      }
+      
+      const servicosDisponiveis = (b.listaServicos || []).slice(0, 3).map(s => `<li>${s.nome}</li>`).join('');
+
+      lista.innerHTML += `
+        <div class="card barbeiro-card" onclick="abrirBarbeiroPerfil('${doc.id}')">
+          <div class="card-header">
+              <div class="card-header-info">
+                  <h4>💈 ${b.nome}</h4>
+                  <p>🏙️ ${b.cidade}</p>
+              </div>
+              <div class="card-reputacao">
+                  ${reputacaoEstrelas}<br>
+                  <span>(${b.reputacao || 100})</span>
+              </div>
+          </div>
+          
+          ${statusHtml}
+          
+          ${servicosDisponiveis ? `
+            <div>
+              <div class="card-servicos-title">Principais Serviços:</div>
+              <ul class="card-servicos-list">${servicosDisponiveis}</ul>
+            </div>
+          ` : ''}
+
+          ${promosHtml}
+        </div>`;
+    });
+  });
+}
+
+function resetAgendamentoState() {
+    agendamentoState = { barbeiroUid: null, barbeiroNome: null, servico: null, horario: null };
+}
+
+function selecionarServico(element, servico) {
+    document.querySelectorAll('#barbeiroPerfilServicosList .selectable-item').forEach(item => item.classList.remove('selected'));
+    element.classList.add('selected');
+    agendamentoState.servico = servico;
+    verificarEstadoBotaoAgendar();
+}
+
+function selecionarHorario(element, horario) {
+    document.querySelectorAll('#barbeiroPerfilHorariosList .selectable-item').forEach(item => item.classList.remove('selected'));
+    element.classList.add('selected');
+    agendamentoState.horario = horario;
+    verificarEstadoBotaoAgendar();
+}
+
+function verificarEstadoBotaoAgendar() {
+    const btn = document.getElementById('btnConfirmarAgendamento');
+    btn.disabled = !(agendamentoState.servico && agendamentoState.horario);
+}
+
+async function abrirBarbeiroPerfil(barbeiroUid) {
+    try {
+        resetAgendamentoState();
+        const barbeiroDoc = await db.collection("usuarios").doc(barbeiroUid).get();
+        if (!barbeiroDoc.exists) {
+            throw new Error("Barbeiro não encontrado.");
+        }
+
+        const b = barbeiroDoc.data();
+        agendamentoState.barbeiroUid = barbeiroUid;
+        agendamentoState.barbeiroNome = b.nome;
+
+        document.getElementById("barbeiroPerfilNome").textContent = `💈 ${b.nome}`;
+        const endereco = (b.rua && b.numero) ? `${b.rua}, ${b.numero} - ${b.cidade}` : b.cidade;
+        document.getElementById("barbeiroPerfilEndereco").textContent = endereco;
+        const reputacaoEstrelas = '⭐'.repeat(Math.round((b.reputacao || 100) / 20));
+        document.getElementById("barbeiroPerfilReputacao").textContent = `${reputacaoEstrelas} (${b.reputacao || 100})`;
+
+        const servicosList = document.getElementById("barbeiroPerfilServicosList");
+        servicosList.innerHTML = "";
+        if (b.listaServicos && b.listaServicos.length > 0) {
+            b.listaServicos.forEach(s => {
+                const servicoJSON = JSON.stringify(s).replace(/"/g, '&quot;');
+                const duracaoTexto = s.duracao ? ` - ${s.duracao} min` : '';
+                servicosList.innerHTML += `
+                    <div class="selectable-item" onclick='selecionarServico(this, ${servicoJSON})'>
+                        ${s.nome} - R$ ${s.valor.toFixed(2)}${duracaoTexto}
+                    </div>`;
+            });
+        } else {
+            servicosList.innerHTML = "<p>Nenhum serviço cadastrado.</p>";
+        }
+
+        const horariosList = document.getElementById("barbeiroPerfilHorariosList");
+        horariosList.innerHTML = "";
+        let hasOptions = false;
+
+        if (b.vagaImediata) {
+            horariosList.innerHTML += `
+                <div class="selectable-item" onclick='selecionarHorario(this, "imediato")'>
+                    ⚡ Vaga Imediata
+                </div>`;
+            hasOptions = true;
+        }
+        if (b.usaAgendaManual) {
+            const horarios = Object.keys(b.agenda || {}).filter(h => b.agenda[h]).sort();
+            if (horarios.length > 0) {
+                horarios.forEach(h => {
+                    horariosList.innerHTML += `
+                        <div class="selectable-item" onclick='selecionarHorario(this, "${h}")'>
+                            📅 ${h}
+                        </div>`;
+                });
+                hasOptions = true;
+            }
+        }
+        if (!hasOptions) {
+            horariosList.innerHTML = "<p>Nenhuma opção de agendamento disponível no momento.</p>";
+        }
+        
+        document.getElementById('btnConfirmarAgendamento').onclick = confirmarAgendamento;
+        verificarEstadoBotaoAgendar();
+        abrirModal('modalBarbeiroPerfil');
+
+    } catch (error) {
+        console.error("Erro ao abrir perfil do barbeiro:", error);
+        alert("Ocorreu um erro ao carregar as informações do barbeiro. Por favor, tente novamente.");
+    }
+}
+
+function confirmarAgendamento() {
+    const { barbeiroUid, barbeiroNome, servico, horario } = agendamentoState;
+    if (!servico || !horario) return;
+
+    const preco = perfil.vip ? servico.valor * 0.9 : servico.valor;
+    if (perfil.saldo < preco) {
+        alert("💸 Saldo insuficiente. Por favor, deposite mais dinheiro em sua carteira.");
+        abrirModal('modalCarteira');
+        return;
+    }
+
+    const horarioTexto = horario === 'imediato' ? 'uma Vaga Imediata' : `o horário das ${horario}`;
+    
+    let detalhes = `Confirma o agendamento?\n\n` +
+                 `Barbeiro: ${barbeiroNome}\n` +
+                 `Serviço: ${servico.nome}\n`;
+
+    if (servico.duracao) {
+        detalhes += `Duração Estimada: ${servico.duracao} minutos\n`;
+    }
+
+    detalhes += `Horário: ${horarioTexto}\n` +
+                `Valor: R$ ${preco.toFixed(2)}` +
+                `${perfil.vip ? ' (Desconto VIP de 10% aplicado)' : ''}`;
+
+    const confirmacao = confirm(detalhes);
+    
+    if (!confirmacao) return;
+
+    const agendamentoData = {
+        clienteUid: auth.currentUser.uid,
+        clienteNome: perfil.nome,
+        clienteTelefone: perfil.telefone, 
+        barbeiroUid,
+        barbeiroNome,
+        servico: servico.nome,
+        valor: preco,
+        status: horario === 'imediato' ? 'imediato' : 'pendente',
+        ts: firebase.firestore.FieldValue.serverTimestamp(),
+        avaliado: false 
+    };
+    if (horario !== 'imediato') {
+        agendamentoData.horario = horario;
+    }
+
+    db.collection("agendamentos").add(agendamentoData)
+    .then(() => {
+        const tipoAviso = horario === 'imediato' ? 'vaga imediata' : `agendamento para as ${horario}`;
+        criarAviso(barbeiroUid, `🔔 Novo pedido de ${tipoAviso} de ${perfil.nome} para ${servico.nome}.`);
+        criarAviso(auth.currentUser.uid, "✅ Seu pedido foi enviado! Aguarde a aprovação do barbeiro.");
+        
+        // NOTIFICAÇÃO
+        notifyUser(barbeiroUid, "🔔 Novo Agendamento Recebido!", `${perfil.nome} quer agendar "${servico.nome}".`);
+
+        alert("Pedido enviado com sucesso!");
+        fecharModal({ target: document.getElementById('modalBarbeiroPerfil') });
+    }).catch(e => {
+        alert("Erro ao enviar pedido: " + e.message);
+    });
+}
+
+function abrirModalVagaAprovada(agendamentoId) {
+    const modal = document.getElementById('modalVagaImediataAprovada');
+    const btnCancelar = document.getElementById('btnCancelarVagaAprovada');
+    
+    const novoBtnCancelar = btnCancelar.cloneNode(true);
+    btnCancelar.parentNode.replaceChild(novoBtnCancelar, btnCancelar);
+    
+    novoBtnCancelar.onclick = () => cancelarAgendamentoAposAprovacao(agendamentoId);
+    
+    abrirModal('modalVagaImediataAprovada');
+}
+
+async function cancelarAgendamentoAposAprovacao(agendamentoId) {
+    if (!confirm("Tem certeza que deseja cancelar? O valor será reembolsado, mas esta ação não pode ser desfeita.")) return;
+
+    try {
+        const agendamentoDoc = await db.collection("agendamentos").doc(agendamentoId).get();
+        if (!agendamentoDoc.exists) throw new Error("Agendamento não encontrado.");
+
+        const agendamento = agendamentoDoc.data();
+        const valor = agendamento.valor;
+        const barbeiroUid = agendamento.barbeiroUid;
+        const clienteUid = agendamento.clienteUid;
+
+        await db.runTransaction(async t => {
+            const clienteRef = db.collection("usuarios").doc(clienteUid);
+            const barbeiroRef = db.collection("usuarios").doc(barbeiroUid);
+            const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+
+            t.update(clienteRef, { saldo: firebase.firestore.FieldValue.increment(valor) });
+            t.update(barbeiroRef, { saldo: firebase.firestore.FieldValue.increment(-(valor * (1 - TAXA))) });
+            
+            const adminSnap = await db.collection("usuarios").where("tipo", "==", "admin").limit(1).get();
+            if (!adminSnap.empty) {
+                const adminRef = db.collection("usuarios").doc(adminSnap.docs[0].id);
+                t.update(adminRef, { saldo: firebase.firestore.FieldValue.increment(-(valor * TAXA)) });
+            }
+            
+            t.update(agendamentoRef, { status: "cancelado" });
+        });
+
+        criarAviso(barbeiroUid, `❌ O cliente ${perfil.nome} cancelou a vaga imediata. O valor foi estornado.`);
+        // NOTIFICAÇÃO
+        notifyUser(barbeiroUid, "❌ Agendamento Cancelado", `${perfil.nome} cancelou a vaga imediata. O valor foi estornado.`);
+        
+        alert("Agendamento cancelado e valor reembolsado com sucesso.");
+        fecharModal({ target: document.getElementById('modalVagaImediataAprovada') });
+
+    } catch (e) {
+        alert("Erro ao cancelar agendamento: " + e.message);
+        console.error("Erro no reembolso:", e);
+    }
+}
+
+
+function abrirHistoricoCliente() {
+  const painel = document.getElementById("conteudoCliente");
+  painel.innerHTML = `
+    <h3>📜 Meu Histórico</h3>
+    <div id="painelHistorico" class="scrollable-list"></div>
+  `;
+  const painelHistorico = document.getElementById("painelHistorico");
+  db.collection("agendamentos")
+    .where("clienteUid", "==", auth.currentUser.uid)
+    .where("status", "in", ["concluido", "cancelado"])
+    .orderBy("ts", "desc")
+    .limit(20)
+    .onSnapshot(snap => {
+      painelHistorico.innerHTML = "";
+      snap.forEach(doc => {
+        const a = doc.data();
+        let statusTexto = "";
+        let botoes = "";
+        if (a.status === "concluido") {
+          statusTexto = "✂️ Concluído";
+          if (a.avaliado === false) {
+            botoes = `<button onclick="abrirModalAvaliacao('${doc.id}', '${a.barbeiroUid}')">⭐ Avaliar</button>`;
+          } else {
+            botoes = `<p>✅ Avaliado</p>`;
+          }
+        } else if (a.status === "cancelado") {
+          statusTexto = "❌ Cancelado";
+        }
+        painelHistorico.innerHTML += `<div class="card">
+          ✂️ ${a.servico} - R$ ${a.valor.toFixed(2)}<br>
+          Barbeiro: ${a.barbeiroNome}<br>
+          Status: <b>${statusTexto}</b>
+          <br>
+          ${botoes}
+        </div>`;
+      });
+    });
+}
+
+function abrirHistoricoBarbeiro() {
+  const painel = document.getElementById("conteudoBarbeiro");
+  painel.innerHTML = `
+    <h3>📜 Meu Histórico</h3>
+    <div id="painelHistoricoBarbeiro" class="scrollable-list"></div>
+  `;
+  const painelHistorico = document.getElementById("painelHistoricoBarbeiro");
+  db.collection("agendamentos")
+    .where("barbeiroUid", "==", auth.currentUser.uid)
+    .where("status", "in", ["concluido", "cancelado"])
+    .orderBy("ts", "desc")
+    .limit(20)
+    .onSnapshot(snap => {
+      painelHistorico.innerHTML = "";
+      snap.forEach(doc => {
+        const a = doc.data();
+        let statusTexto = a.status === "concluido" ? "✂️ Concluído" : "❌ Cancelado";
+        painelHistorico.innerHTML += `<div class="card">
+          Cliente: ${a.clienteNome}<br>
+          Serviço: ${a.servico} - R$ ${a.valor.toFixed(2)}<br>
+          Status: <b>${statusTexto}</b>
+        </div>`;
+      });
+    });
+}
+
+function abrirModalAvaliacao(agendamentoId, barbeiroUid) {
+  const nota = parseInt(prompt("Avalie o serviço de 1 a 10:"));
+  if (isNaN(nota) || nota < 1 || nota > 10) {
+    return alert("Avaliação inválida. Use um número de 1 a 10.");
+  }
+  const comentario = prompt("Deixe um comentário sobre o serviço:");
+  avaliarServico(agendamentoId, barbeiroUid, nota, comentario);
+}
+
+function avaliarServico(agendamentoId, barbeiroUid, nota, comentario) {
+  const reputacaoGanho = nota >= 7 ? 10 : nota <= 4 ? -10 : 0;
+  db.runTransaction(async t => {
+    const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+    const barbeiroRef = db.collection("usuarios").doc(barbeiroUid);
+    const clienteRef = db.collection("usuarios").doc(auth.currentUser.uid);
+    
+    const agendamentoDoc = await t.get(agendamentoRef);
+    if (agendamentoDoc.data().avaliado) {
+      throw "Este serviço já foi avaliado.";
+    }
+
+    t.update(agendamentoRef, { avaliado: true });
+    t.update(barbeiroRef, { reputacao: firebase.firestore.FieldValue.increment(reputacaoGanho) });
+    t.set(db.collection("avaliacoes").doc(), {
+      barbeiroUid,
+      clienteUid: auth.currentUser.uid,
+      nota,
+      comentario: comentario || "Sem comentário",
+      ts: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    t.update(clienteRef, { pontosFidelidade: firebase.firestore.FieldValue.increment(PONTOS_POR_CORTE) });
+
+  }).then(() => {
+    alert(`Avaliação enviada com sucesso! Você ganhou ${PONTOS_POR_CORTE} pontos de fidelidade.`);
+    criarAviso(barbeiroUid, `⭐ Você recebeu uma nova avaliação de ${perfil.nome}.`);
+    // NOTIFICAÇÕES
+    notifyUser(barbeiroUid, "⭐ Nova Avaliação!", `${perfil.nome} deixou uma avaliação de nota ${nota} para você.`);
+    notifyUser(auth.currentUser.uid, "🏆 Pontos Recebidos!", `Você ganhou ${PONTOS_POR_CORTE} pontos de fidelidade por avaliar o serviço.`);
+  }).catch(e => {
+    alert("Erro ao avaliar: " + e);
+  });
+}
+
+function resgatarPontos() {
+  if (perfil.pontosFidelidade < PONTOS_PARA_RESGATE) {
+    return alert(`Você precisa de ${PONTOS_PARA_RESGATE} pontos para resgatar. Você tem apenas ${perfil.pontosFidelidade}.`);
+  }
+  if (!confirm(`Deseja resgatar seus ${PONTOS_PARA_RESGATE} pontos por R$ ${VALOR_RESGATE.toFixed(2)}?`)) return;
+  
+  db.runTransaction(t => {
+    const ref = db.collection("usuarios").doc(auth.currentUser.uid);
+    return t.get(ref).then(doc => {
+      const pontosAtuais = doc.data().pontosFidelidade;
+      if (pontosAtuais < PONTOS_PARA_RESGATE) {
+        throw "Pontos insuficientes.";
+      }
+      t.update(ref, {
+        pontosFidelidade: firebase.firestore.FieldValue.increment(-PONTOS_PARA_RESGATE),
+        saldo: firebase.firestore.FieldValue.increment(VALOR_RESGATE)
+      });
+    });
+  }).then(() => {
+    alert(`🎉 Parabéns! Você resgatou R$ ${VALOR_RESGATE.toFixed(2)} com seus pontos!`);
+    // NOTIFICAÇÃO
+    notifyUser(auth.currentUser.uid, "💸 Pontos Resgatados!", `Você converteu ${PONTOS_PARA_RESGATE} pontos em R$${VALOR_RESGATE.toFixed(2)} na sua carteira.`);
+  }).catch(e => {
+    alert("Erro ao resgatar pontos: " + e.message);
+  });
+}
+
+function assinarVip() {
+    if (perfil.saldo < PRECO_VIP) {
+        alert("Saldo insuficiente para assinar o VIP. Por favor, deposite mais dinheiro em sua carteira.");
+        abrirModal('modalCarteira');
+        return;
+    }
+
+    if (!confirm(`Deseja assinar o plano VIP por R$ ${PRECO_VIP.toFixed(2)}? O valor será descontado de sua carteira.`)) {
+        return;
+    }
+    
+    db.runTransaction(async t => {
+        const clienteRef = db.collection("usuarios").doc(auth.currentUser.uid);
+        const financeiroRef = db.collection("config").doc("financeiro");
+
+        const clienteDoc = await t.get(clienteRef);
+        if (clienteDoc.data().vip) {
+            throw "Você já é um membro VIP.";
+        }
+        
+        t.update(clienteRef, {
+            saldo: firebase.firestore.FieldValue.increment(-PRECO_VIP),
+            vip: true
+        });
+
+        t.set(financeiroRef, { arrecadadoVip: firebase.firestore.FieldValue.increment(PRECO_VIP) }, { merge: true });
+
+    }).then(() => {
+        alert("Parabéns! Você agora é um membro VIP!");
+        // NOTIFICAÇÃO
+        notifyUser(auth.currentUser.uid, "👑 Bem-vindo ao VIP!", "Aproveite 10% de desconto e benefícios exclusivos!");
+    }).catch(e => {
+        alert("Erro ao assinar VIP: " + e.message);
+    });
+}
+
+async function abrirChatGlobal() {
+  // NOVO: Remove a classe piscante ao abrir o chat
+  document.getElementById('btnChat').classList.remove('blinking-chat');
+  
+  abrirModal('janelaChat');
+  const chatContainer = document.getElementById("chatMessages");
+  chatContainer.innerHTML = "";
+  const chatTitle = document.getElementById("chatTitle");
+
+  if (perfil.vip) {
+      chatTitle.innerHTML = `<span style="color:var(--cor-destaque-ouro); text-shadow:0 0 5px var(--cor-destaque-ouro);">💎 Cliente VIP</span>`;
+  } else {
+      chatTitle.innerHTML = `💬 Chat Global`;
+  }
+  
+  if (chatListener) chatListener();
+
+  const chatDoc = await db.collection("chats").doc(CHAT_GLOBAL_ID).get();
+  if (!chatDoc.exists) {
+    await db.collection("chats").doc(CHAT_GLOBAL_ID).set({ tipo: "global" });
+  }
+
+  chatListener = db.collection("chats").doc(CHAT_GLOBAL_ID).collection("mensagens")
+    .orderBy("ts")
+    .limitToLast(8) 
+    .onSnapshot(async snapshot => {
+      for (const change of snapshot.docChanges()) {
+        if (change.type === "added") {
+          const msg = change.doc.data();
+          
+          let remetenteNome = msg.remetenteNome || "Desconhecido";
+          let classe = msg.remetenteUid === auth.currentUser.uid ? "chat-sent" : "chat-received";
+          
+          const remetenteDoc = await db.collection("usuarios").doc(msg.remetenteUid).get();
+          
+          if (msg.tipo === "bot") {
+              remetenteNome = `<span style="color: red;">🤖 ${remetenteNome}</span>`;
+          } else if(remetenteDoc.exists) {
+              const remetenteData = remetenteDoc.data();
+              if (remetenteData.tipo === "admin") {
+                  remetenteNome = `<span class="admin-chat">👑 ${remetenteData.nome}</span>`;
+              } else if (remetenteData.tipo === "barbeiro") {
+                  remetenteNome = `<span style="color: #007BFF;">💈 ${remetenteData.nome}</span>`;
+              } else if (remetenteData.vip) {
+                  remetenteNome = `<span style="color: var(--cor-destaque-ouro); text-shadow: 0 0 5px var(--cor-destaque-ouro);">👑 ${remetenteData.nome}</span>`;
+              } else {
+                  remetenteNome = `👤 ${remetenteData.nome}`;
+              }
+          }
+
+          const messageDiv = document.createElement('div');
+          messageDiv.className = `chat-message ${classe}`;
+          messageDiv.innerHTML = `<b>${remetenteNome}:</b> ${msg.texto}`;
+          chatContainer.prepend(messageDiv);
+        }
+      }
+    });
+    
+    // NOVO: Adiciona listener para a tecla Enter no input do chat
+    const chatInput = document.getElementById('chatInput');
+    chatInput.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault(); // Impede a quebra de linha
+            enviarMensagem();
+        }
+    });
+
+    if (!botInterval) {
+        botInterval = setInterval(sendBotMessage, 600000);
+    }
+}
+
+const botMessages = [
+    "Dica: Avalie seu barbeiro após o serviço para ganhar 10 pontos de fidelidade e ajudar a comunidade!",
+    "Você sabia? Indicando um amigo com seu e-mail, vocês dois ganham 100 pontos de fidelidade após o primeiro agendamento concluído dele!",
+    "Mantenha seu saldo atualizado! Use a função de depósito para adicionar créditos via Pix de forma rápida e segura.",
+    "Precisa de ajuda ou tem uma sugestão? Use a opção 'Denunciar' para falar diretamente com um administrador.",
+    "Torne-se VIP para ter 10% de desconto em todos os serviços e ganhar o dobro de pontos nos depósitos!",
+    "Barbeiros: mantenham sua agenda e serviços atualizados para atrair mais clientes e facilitar os agendamentos.",
+    "Fique de olho no nosso Blog! Administradores podem postar códigos de resgate valendo pontos de fidelidade. Procure por códigos entre (parênteses)!"
+];
+
+let lastBotMessageIndex = -1;
+
+function sendBotMessage() {
+    let randomIndex;
+    do {
+        randomIndex = Math.floor(Math.random() * botMessages.length);
+    } while (randomIndex === lastBotMessageIndex);
+    lastBotMessageIndex = randomIndex;
+    const message = botMessages[randomIndex];
+    db.collection("chats").doc(CHAT_GLOBAL_ID).collection("mensagens").add({
+        remetenteUid: "bot-uid",
+        remetenteNome: "Navalha de Ouro Bot",
+        tipo: "bot",
+        texto: message,
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+    });
+}
+
+function enviarMensagem() {
+
+  // 1. Verifica se já está enviando uma mensagem. Se sim, sai da função.
+
+  if (isSending) {
+
+    return;
+
+  }
+
+
+
+  const texto = document.getElementById("chatInput").value.trim();
+
+  if (!texto) return;
+
+
+
+  // 2. Bloqueia o envio. O valor de isSending agora é 'true'.
+
+  isSending = true;
+
+
+
+  // 3. Sua lógica de envio da mensagem para o Firestore
+
+  db.collection("chats").doc(CHAT_GLOBAL_ID).collection("mensagens").add({
+
+    remetenteUid: auth.currentUser.uid,
+
+    remetenteNome: perfil.nome,
+
+    tipo: perfil.tipo,
+
+    texto,
+
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+
+  }).then(() => {
+
+    // 4. A mensagem foi enviada com sucesso, agora libera o campo de texto.
+
+    document.getElementById("chatInput").value = "";
+
+    
+
+    // 5. Usa setTimeout para agendar a liberação do envio após 1 segundo (1000ms).
+
+    // A função de dentro do setTimeout será executada após 1000 milissegundos.
+
+    setTimeout(() => {
+
+      isSending = false;
+
+    }, 1000);
+
+
+
+  }).catch(error => {
+
+    // Em caso de erro, você também deve liberar o envio para não travar o chat
+
+    console.error("Erro ao enviar mensagem: ", error);
+
+    isSending = false;
+
+  });
+
+}
+
+function criarAviso(uid, mensagem, tipo = 'geral', agendamentoId = null) {
+  const avisoData = {
+    usuarioUid: uid,
+    mensagem,
+    tipo,
+    lido: false,
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if (agendamentoId) {
+      avisoData.agendamentoId = agendamentoId;
+  }
+  db.collection("avisos").add(avisoData);
+}
+
+function enviarDenuncia() {
+  const texto = document.getElementById("textoDenuncia").value.trim();
+  if (!texto) return alert("Por favor, descreva o problema.");
+  
+  db.collection("denuncias").add({
+    usuarioUid: auth.currentUser.uid,
+    usuarioNome: perfil.nome,
+    texto,
+    status: "aberta",
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  }).then(denunciaRef => {
+    abrirModal('modalDenunciaEnviada');
+    const btnWhatsapp = document.getElementById("btnWhatsappDenuncia");
+    const mensagem = encodeURIComponent(`🚨 Nova denúncia no app. ID: ${denunciaRef.id}\n\nDe: ${perfil.nome}\n\nDescrição: ${texto}`);
+    btnWhatsapp.href = `https://wa.me/${WHATSAPP_ADM_PHONE}?text=${mensagem}`;
+    document.getElementById("textoDenuncia").value = "";
+    // NOTIFICAÇÃO
+    notifyAdmins("🚨 Nova Denúncia!", `Uma nova denúncia foi enviada por ${perfil.nome}.`);
+  }).catch(e => {
+    alert("Erro ao enviar denúncia: " + e.message);
+  });
+}
+
+// Funções do Barbeiro
+function carregarBarbeiro() {
+  document.getElementById("conteudoBarbeiro").innerHTML = "<p>👈 Escolha uma opção acima</p>";
+}
+
+function abrirServicos() {
+  document.getElementById("conteudoBarbeiro").innerHTML = `
+    <h3>✂️ Meus Serviços</h3>
+    <div id="listaServicosBarbeiro" class="scrollable-list"></div>
+    <button onclick="adicionarServico()">+ Adicionar novo serviço</button>
+  `;
+  listarServicos();
+}
+
+function listarServicos() {
+  const lista = document.getElementById("listaServicosBarbeiro");
+  lista.innerHTML = "<p>⏳ Carregando serviços...</p>";
+  db.collection("usuarios").doc(auth.currentUser.uid).onSnapshot(doc => {
+    const p = doc.data();
+    perfil = p;
+    lista.innerHTML = "";
+    if (!p.listaServicos || p.listaServicos.length === 0) {
+      lista.innerHTML = "<p>Nenhum serviço cadastrado.</p>";
+      return;
+    }
+    p.listaServicos.forEach((servico, index) => {
+      const duracaoTexto = servico.duracao ? `(${servico.duracao} min)` : '';
+      lista.innerHTML += `<div class="card">
+        <b>${servico.nome}</b> - R$ ${servico.valor.toFixed(2)} ${duracaoTexto}
+        <button onclick="removerServico(${index})" style="float:right">❌</button>
+      </div>`;
+    });
+  });
+}
+
+function adicionarServico() {
+  const nome = prompt("Nome do serviço:");
+  const valor = parseFloat(prompt("Valor do serviço (ex: 25.50):"));
+  const duracao = parseInt(prompt("Duração do serviço em minutos (ex: 30):"));
+  if (!nome || isNaN(valor) || valor <= 0 || isNaN(duracao) || duracao <= 0) {
+      return alert("Entrada inválida. Preencha todos os campos corretamente.");
+  }
+
+  const servico = { nome, valor, duracao };
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    listaServicos: firebase.firestore.FieldValue.arrayUnion(servico)
+  }).then(() => {
+    alert("Serviço adicionado com sucesso!");
+  }).catch(e => alert("Erro ao adicionar serviço: " + e.message));
+}
+
+function removerServico(index) {
+  const servicoParaRemover = perfil.listaServicos[index];
+  if (!confirm(`Deseja remover o serviço "${servicoParaRemover.nome}"?`)) return;
+
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    listaServicos: firebase.firestore.FieldValue.arrayRemove(servicoParaRemover)
+  }).then(() => {
+    alert("Serviço removido com sucesso!");
+  }).catch(e => alert("Erro ao remover serviço: " + e.message));
+}
+
+function alterarNomeBarbeiro(event) {
+  const novoNome = document.getElementById("novoNomeBarbeiro").value.trim();
+  if (!novoNome) {
+    return alert("Por favor, insira um nome válido.");
+  }
+  
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    nome: novoNome
+  }).then(() => {
+    alert("Nome alterado com sucesso!");
+    document.getElementById("novoNomeBarbeiro").value = "";
+    fecharModal(event);
+  }).catch(e => {
+    alert("Erro ao alterar nome: " + e.message);
+  });
+}
+
+function abrirAgenda() {
+    const painel = document.getElementById("conteudoBarbeiro");
+    painel.innerHTML = `
+        <h3>📅 Minha Agenda</h3>
+        <p>Use os botões abaixo para gerenciar sua disponibilidade e horários.</p>
+        <button id="btnDisponibilidade" onclick="toggleDisponibilidade()"></button>
+        <button id="btnVagaImediata" onclick="toggleVagaImediata()"></button>
+        <button id="btnAgendaManual" onclick="toggleAgendaManual()"></button>
+        <div id="agendaManualPainel" class="hidden card">
+            <h4>Horários Disponíveis Hoje</h4>
+            <p>Selecione os horários que deseja trabalhar.</p>
+            <div id="horariosContainer" style="display:flex; flex-wrap:wrap; gap:5px; justify-content: center;"></div>
+            <div class="horarios-actions">
+                <button onclick="salvarAgendaManual()">✅ Salvar Agenda</button>
+                <button onclick="cancelarAgendaManual()">❌ Cancelar</button>
+            </div>
+        </div>
+    `;
+    carregarAgenda();
+}
+
+function carregarAgenda() {
+    const btnDisp = document.getElementById("btnDisponibilidade");
+    const btnVagaImediata = document.getElementById("btnVagaImediata");
+    const btnAgendaManual = document.getElementById("btnAgendaManual");
+    const agendaManualPainel = document.getElementById("agendaManualPainel");
+    const horariosContainer = document.getElementById("horariosContainer");
+
+    if (agendamentoListener) {
+        agendamentoListener();
+    }
+    
+    db.collection("usuarios").doc(auth.currentUser.uid).onSnapshot(doc => {
+        perfil = doc.data(); 
+        
+        btnDisp.textContent = perfil.disponivel === 'sim' ? '🔴 Ficar Indisponível (Automático)' : '🟢 Ficar Disponível (Automático)';
+        btnVagaImediata.textContent = perfil.vagaImediata ? '⚠️ Desativar Vaga Imediata' : '⚡ Ativar Vaga Imediata';
+        btnAgendaManual.textContent = perfil.usaAgendaManual ? '❌ Desativar Agenda Manual' : '📅 Ativar Agenda Manual';
+        
+        if (perfil.usaAgendaManual) {
+            agendaManualPainel.classList.remove("hidden");
+            horariosContainer.innerHTML = "";
+            tempSelectedHorarios = { ...perfil.agenda };
+            for (let i = 7; i <= 18; i++) {
+                const horario = `${i}:00`;
+                const isSelecionado = tempSelectedHorarios[horario];
+                const btn = document.createElement('button');
+                btn.textContent = horario;
+                btn.className = `horario-btn ${isSelecionado ? 'selecionado' : ''}`;
+                btn.onclick = () => toggleHorario(horario);
+                horariosContainer.appendChild(btn);
+            }
+        } else {
+            agendaManualPainel.classList.add("hidden");
+        }
+    });
+}
+
+function abrirAgendamentosBarbeiro() {
+  document.getElementById("conteudoBarbeiro").innerHTML = `
+    <h3>⏰ Meus Agendamentos</h3>
+    <div id="agendamentosPainel" class="scrollable-list"></div>
+  `;
+  const painel = document.getElementById("agendamentosPainel");
+  painel.innerHTML = "<p>⏳ Carregando agendamentos...</p>";
+
+  db.collection("agendamentos")
+    .where("barbeiroUid", "==", auth.currentUser.uid)
+    .where("status", "in", ["pendente", "confirmado", "imediato", "conclusão pendente"])
+    .orderBy("ts", "asc")
+    .onSnapshot(snap => {
+        painel.innerHTML = "";
+        if (snap.empty) {
+            painel.innerHTML = "<p>Nenhum agendamento ativo no momento.</p>";
+            return;
+        }
+        snap.forEach(doc => {
+            const ag = doc.data();
+            const clienteNome = ag.clienteNome || "Cliente Desconhecido";
+            let botoes = "";
+            let statusTexto = "";
+            let horarioInfo = ag.horario ? ` às <b>${ag.horario}</b>` : ' (Vaga Imediata)';
+            let telefoneInfo = '';
+            if (ag.clienteTelefone) {
+                telefoneInfo = `<br><a href="https://wa.me/55${ag.clienteTelefone}" target="_blank">📞 Contatar Cliente</a>`;
+            }
+
+            if (ag.status === "pendente") {
+                statusTexto = "⏳ Aguardando Aprovação";
+                botoes = `
+                    <button onclick="aprovarAgendamento('${doc.id}', '${ag.clienteUid}', ${ag.valor}, '${ag.horario}')">✅ Aprovar</button>
+                    <button onclick="recusarAgendamento('${doc.id}', '${ag.clienteUid}')">❌ Recusar</button>
+                `;
+            } else if (ag.status === "confirmado" || ag.status === "conclusão pendente") {
+                statusTexto = "✅ Conclusão Pendente";
+                botoes = `
+                    <button onclick="concluirAgendamento('${doc.id}', '${ag.clienteUid}')">✂️ Concluir Serviço</button>
+                    <button onclick="cancelarAgendamentoManualmente('${doc.id}', '${ag.clienteUid}', ${ag.valor})">❌ Cancelar</button>
+                `;
+            } else if (ag.status === "imediato") {
+                statusTexto = "⚡ Vaga Imediata Pendente";
+                botoes = `
+                    <button onclick="aprovarAgendamentoImediato('${doc.id}', '${ag.clienteUid}', ${ag.valor})">✅ Aprovar Vaga Imediata</button>
+                    <button onclick="recusarAgendamento('${doc.id}', '${ag.clienteUid}')">❌ Recusar</button>
+                `;
+            }
+
+            painel.innerHTML += `<div class="card">
+                <b>${clienteNome}</b> - ${ag.servico} (R$ ${ag.valor.toFixed(2)})<br>
+                Horário: ${horarioInfo} <br>
+                Status: <b>${statusTexto}</b>
+                ${telefoneInfo}
+                <div style="margin-top:10px; display:flex; gap: 8px;">${botoes}</div>
+            </div>`;
+        });
+    });
+}
+
+
+function toggleVagaImediata() {
+    db.collection("usuarios").doc(auth.currentUser.uid).update({
+        vagaImediata: !perfil.vagaImediata
+    }).catch(e => alert("Erro ao alternar vaga imediata: " + e.message));
+}
+
+function toggleAgendaManual() {
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    usaAgendaManual: !perfil.usaAgendaManual
+  }).catch(e => alert("Erro: " + e.message));
+}
+
+function toggleHorario(horario) {
+    const btn = Array.from(document.querySelectorAll('#horariosContainer .horario-btn')).find(b => b.textContent === horario);
+    if (tempSelectedHorarios[horario]) {
+        delete tempSelectedHorarios[horario];
+        btn.classList.remove("selecionado");
+    } else {
+        tempSelectedHorarios[horario] = true;
+        btn.classList.add("selecionado");
+    }
+}
+
+function salvarAgendaManual() {
+    db.collection("usuarios").doc(auth.currentUser.uid).update({
+        agenda: tempSelectedHorarios
+    }).then(() => {
+        alert("Agenda salva com sucesso!");
+    }).catch(e => {
+        alert("Erro ao salvar agenda: " + e.message);
+    });
+}
+
+function cancelarAgendaManual() {
+    const horariosContainer = document.getElementById("horariosContainer");
+    horariosContainer.innerHTML = "";
+    tempSelectedHorarios = { ...perfil.agenda };
+    for (let i = 7; i <= 18; i++) {
+        const horario = `${i}:00`;
+        const isSelecionado = tempSelectedHorarios[horario];
+        const btn = document.createElement('button');
+        btn.textContent = horario;
+        btn.className = `horario-btn ${isSelecionado ? 'selecionado' : ''}`;
+        btn.onclick = () => toggleHorario(horario);
+        horariosContainer.appendChild(btn);
+    }
+    alert("Alterações canceladas.");
+}
+
+function toggleDisponibilidade() {
+  const novoStatus = perfil.disponivel === "sim" ? "nao" : "sim";
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    disponivel: novoStatus
+  }).catch(e => alert("Erro: " + e.message));
+}
+
+async function aprovarAgendamentoImediato(agendamentoId, clienteUid, valor) {
+    if (!confirm("Deseja aprovar esta vaga imediata?")) return;
+
+    const valorComTaxa = valor * (1 - TAXA);
+    const valorAdmin = valor * TAXA;
+
+    db.runTransaction(async t => {
+        const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+        const clienteRef = db.collection("usuarios").doc(clienteUid);
+        const barbeiroRef = db.collection("usuarios").doc(auth.currentUser.uid);
+        const financeiroRef = db.collection("config").doc("financeiro");
+
+        const clienteDoc = await t.get(clienteRef);
+        const barbeiroDoc = await t.get(barbeiroRef);
+        
+        const agendamentoDoc = await t.get(agendamentoRef);
+        if (agendamentoDoc.data().status !== 'imediato') {
+            throw "Esta solicitação já foi processada.";
+        }
+
+        if (!clienteDoc.exists) throw "Cliente não encontrado.";
+        if (clienteDoc.data().saldo < valor) throw "Saldo do cliente insuficiente.";
+        if (barbeiroDoc.data().vagaImediata === false) throw "Vaga imediata não está mais ativa.";
+
+        t.update(clienteRef, { saldo: firebase.firestore.FieldValue.increment(-valor) });
+        t.update(barbeiroRef, { saldo: firebase.firestore.FieldValue.increment(valorComTaxa) });
+        t.update(agendamentoRef, { status: "conclusão pendente", confirmadoEm: firebase.firestore.FieldValue.serverTimestamp() });
+        t.update(barbeiroRef, { vagaImediata: false }); 
+
+        const adminSnap = await db.collection("usuarios").where("tipo", "==", "admin").limit(1).get();
+        if(!adminSnap.empty) {
+            const adminRef = db.collection("usuarios").doc(adminSnap.docs[0].id);
+            t.update(adminRef, { saldo: firebase.firestore.FieldValue.increment(valorAdmin) });
+        }
+        t.set(financeiroRef, { arrecadadoTaxas: firebase.firestore.FieldValue.increment(valorAdmin) }, { merge: true });
+
+    }).then(() => {
+        criarAviso(clienteUid, `✅ Sua vaga imediata foi aprovada por ${perfil.nome}!`, 'vaga-aprovada', agendamentoId);
+        // NOTIFICAÇÃO
+        notifyUser(clienteUid, "✅ Agendamento Confirmado!", `Sua vaga imediata com ${perfil.nome} foi aprovada. Corra para a barbearia!`);
+        alert("Agendamento aprovado e valores transferidos!");
+    }).catch(e => {
+        alert("Erro ao aprovar agendamento: " + e);
+    });
+}
+
+async function aprovarAgendamento(agendamentoId, clienteUid, valor, horario = null) {
+  if (!confirm("Deseja aprovar este agendamento?")) return;
+
+  const valorComTaxa = valor * (1 - TAXA);
+  const valorAdmin = valor * TAXA;
+
+  db.runTransaction(async t => {
+      const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+      const clienteRef = db.collection("usuarios").doc(clienteUid);
+      const barbeiroRef = db.collection("usuarios").doc(auth.currentUser.uid);
+      const financeiroRef = db.collection("config").doc("financeiro");
+      
+      const agendamentoDoc = await t.get(agendamentoRef);
+      if (agendamentoDoc.data().status !== 'pendente') {
+          throw "Esta solicitação já foi processada.";
+      }
+
+      const clienteDoc = await t.get(clienteRef);
+      const barbeiroDoc = await t.get(barbeiroRef);
+
+      if (!clienteDoc.exists) throw "Cliente não encontrado.";
+      if (clienteDoc.data().saldo < valor) throw "Saldo do cliente insuficiente.";
+
+      t.update(clienteRef, { saldo: firebase.firestore.FieldValue.increment(-valor) });
+      t.update(barbeiroRef, { saldo: firebase.firestore.FieldValue.increment(valorComTaxa) });
+      t.update(agendamentoRef, { status: "conclusão pendente", confirmadoEm: firebase.firestore.FieldValue.serverTimestamp() });
+
+      if (barbeiroDoc.data().usaAgendaManual && horario) {
+          const agendaAtual = barbeiroDoc.data().agenda || {};
+          if (agendaAtual[horario]) {
+              delete agendaAtual[horario];
+              t.update(barbeiroRef, { agenda: agendaAtual });
+          }
+      }
+
+      const adminSnap = await db.collection("usuarios").where("tipo", "==", "admin").limit(1).get();
+      if(!adminSnap.empty) {
+          const adminRef = db.collection("usuarios").doc(adminSnap.docs[0].id);
+          t.update(adminRef, { saldo: firebase.firestore.FieldValue.increment(valorAdmin) });
+      }
+      t.set(financeiroRef, { arrecadadoTaxas: firebase.firestore.FieldValue.increment(valorAdmin) }, { merge: true });
+
+  }).then(() => {
+      criarAviso(clienteUid, `✅ Seu agendamento foi aprovado pelo barbeiro ${perfil.nome}!`);
+      // NOTIFICAÇÃO
+      notifyUser(clienteUid, "✅ Agendamento Confirmado!", `Seu horário com ${perfil.nome} para as ${horario} foi confirmado.`);
+      alert("Agendamento aprovado e valores transferidos!");
+      if (horario && horario !== 'null') {
+          alert(`🔔 Lembrete: O horário das ${horario} foi ocupado e removido da sua agenda de hoje.`);
+      }
+  }).catch(e => {
+      alert("Erro ao aprovar agendamento: " + e);
+  });
+}
+
+function recusarAgendamento(agendamentoId, clienteUid) {
+  if (!confirm("Deseja recusar este agendamento?")) return;
+  db.runTransaction(async t => {
+      const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+      const agendamentoDoc = await t.get(agendamentoRef);
+      const statusAtual = agendamentoDoc.data().status;
+      if (statusAtual !== 'pendente' && statusAtual !== 'imediato') {
+          throw "Esta solicitação já foi processada.";
+      }
+      t.update(agendamentoRef, { status: "cancelado" });
+
+  }).then(() => {
+      criarAviso(clienteUid, `❌ O barbeiro ${perfil.nome} recusou seu agendamento. O valor não foi cobrado da sua carteira.`);
+      // NOTIFICAÇÃO
+      notifyUser(clienteUid, "❌ Agendamento Recusado", `O barbeiro ${perfil.nome} não pôde aceitar seu pedido.`);
+      alert("Agendamento recusado.");
+  }).catch(e => {
+      alert("Erro ao recusar agendamento: " + e);
+  });
+}
+
+async function cancelarAgendamentoManualmente(agendamentoId, clienteUid) {
+  if (!confirm("Deseja cancelar este agendamento? O dinheiro será reembolsado para o cliente e sua reputação será afetada.")) return;
+
+  const agendamentoDoc = await db.collection("agendamentos").doc(agendamentoId).get();
+  const agendamentoData = agendamentoDoc.data();
+  if (!agendamentoData) {
+      alert("Agendamento não encontrado.");
+      return;
+  }
+  
+  const valor = agendamentoData.valor;
+  const valorComTaxa = valor * (1 - TAXA);
+  const valorAdmin = valor * TAXA;
+  
+  db.runTransaction(async t => {
+      const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+      const agendamentoDoc = await t.get(agendamentoRef);
+      if (agendamentoDoc.data().status !== 'confirmado' && agendamentoDoc.data().status !== 'conclusão pendente') {
+          throw "Apenas agendamentos aprovados podem ser cancelados e reembolsados.";
+      }
+
+      const clienteRef = db.collection("usuarios").doc(clienteUid);
+      const barbeiroRef = db.collection("usuarios").doc(auth.currentUser.uid);
+      const financeiroRef = db.collection("config").doc("financeiro");
+      
+      const adminSnap = await db.collection("usuarios").where("tipo", "==", "admin").limit(1).get();
+      if (!adminSnap.empty) {
+          const adminRef = db.collection("usuarios").doc(adminSnap.docs[0].id);
+          t.update(adminRef, { saldo: firebase.firestore.FieldValue.increment(-valorAdmin) });
+      }
+
+      t.update(clienteRef, { saldo: firebase.firestore.FieldValue.increment(valor) });
+      t.update(barbeiroRef, { 
+          saldo: firebase.firestore.FieldValue.increment(-valorComTaxa),
+          reputacao: firebase.firestore.FieldValue.increment(-10) 
+      });
+      t.update(agendamentoRef, { status: "cancelado" });
+      
+      t.set(financeiroRef, { arrecadadoTaxas: firebase.firestore.FieldValue.increment(-valorAdmin) }, { merge: true });
+
+  }).then(() => {
+      criarAviso(clienteUid, `❌ O barbeiro ${perfil.nome} cancelou seu agendamento. O valor de R$ ${valor.toFixed(2)} foi reembolsado.`);
+      // NOTIFICAÇÃO
+      notifyUser(clienteUid, "🔄 Agendamento Cancelado", `${perfil.nome} cancelou seu horário. O valor de R$ ${valor.toFixed(2)} foi estornado para sua carteira.`);
+      alert("Agendamento cancelado e valor reembolsado. Sua reputação diminuiu em 10 pontos.");
+  }).catch(e => {
+      alert("Erro ao cancelar agendamento: " + e);
+  });
+}
+
+async function concluirAgendamento(agendamentoId, clienteUid) {
+  try {
+    const agendamentoRef = db.collection("agendamentos").doc(agendamentoId);
+    const barbeiroRef = db.collection("usuarios").doc(auth.currentUser.uid);
+    const clienteRef = db.collection("usuarios").doc(clienteUid);
+
+    await db.runTransaction(async t => {
+        const agendamentoDoc = await t.get(agendamentoRef);
+        if (agendamentoDoc.data().status !== "conclusão pendente") {
+            throw "Este agendamento não está pendente de conclusão.";
+        }
+        t.update(barbeiroRef, { cortesSemana: firebase.firestore.FieldValue.increment(1) });
+        t.update(agendamentoRef, { status: "concluido" });
+    });
+
+    alert("Serviço concluído com sucesso!");
+    criarAviso(clienteUid, `Agendamento concluído! Você já pode avaliar.`);
+    // NOTIFICAÇÃO
+    notifyUser(clienteUid, "⭐ Avalie sua Experiência!", `O serviço com ${perfil.nome} foi concluído. Deixe sua avaliação e ganhe pontos!`);
+
+    const clienteDoc = await clienteRef.get();
+    const clienteData = clienteDoc.data();
+
+    if (clienteData.bonusIndicacaoPendente) {
+        await clienteRef.update({
+            pontosFidelidade: firebase.firestore.FieldValue.increment(BONUS_INDICACAO),
+            bonusIndicacaoPendente: false
+        });
+        criarAviso(clienteUid, `🎉 Bônus! Você ganhou ${BONUS_INDICACAO} pontos de fidelidade pela sua primeira conclusão de agendamento por indicação!`);
+        // NOTIFICAÇÃO DE BÔNUS
+        notifyUser(clienteUid, "🏆 Bônus de Indicação!", `Você ganhou ${BONUS_INDICACAO} pontos de fidelidade!`);
+
+        const query = await db.collection("usuarios").where("email", "==", clienteData.indicadoPorEmail).limit(1).get();
+        if (!query.empty) {
+            const indicadorDoc = query.docs[0];
+            await indicadorDoc.ref.update({
+                pontosFidelidade: firebase.firestore.FieldValue.increment(BONUS_INDICACAO)
+            });
+            criarAviso(indicadorDoc.id, `🎉 Bônus! Você ganhou ${BONUS_INDICACAO} pontos de fidelidade porque ${clienteData.nome} concluiu o primeiro agendamento!`);
+            // NOTIFICAÇÃO DE BÔNUS PARA QUEM INDICOU
+            notifyUser(indicadorDoc.id, "🏆 Bônus por Indicar!", `Você ganhou ${BONUS_INDICACAO} pontos porque ${clienteData.nome} finalizou o primeiro serviço!`);
+        }
+    }
+  } catch(e) {
+    alert("Erro ao concluir serviço: " + e);
+  }
+}
+
+function abrirClientesBarbeiro() {
+  document.getElementById("conteudoBarbeiro").innerHTML = `
+    <h3>🧑‍🤝‍🧑 Meus Clientes</h3>
+    <p>Lista de clientes que já agendaram com você.</p>
+    <div id="listaClientesBarbeiro" class="scrollable-list"></div>
+  `;
+  listarClientesBarbeiro();
+}
+
+function listarClientesBarbeiro() {
+  const lista = document.getElementById("listaClientesBarbeiro");
+  lista.innerHTML = "<p>⏳ Carregando clientes...</p>";
+  db.collection("agendamentos")
+    .where("barbeiroUid", "==", auth.currentUser.uid)
+    .get()
+    .then(snap => {
+      const clientes = new Set();
+      const clientesMap = {};
+      snap.forEach(doc => {
+        const ag = doc.data();
+        clientes.add(ag.clienteUid);
+        if (!clientesMap[ag.clienteUid]) {
+          clientesMap[ag.clienteUid] = { nome: ag.clienteNome, totalCortes: 0, ultimoCorte: 0 };
+        }
+        clientesMap[ag.clienteUid].totalCortes++;
+        if (ag.ts && ag.ts.seconds > clientesMap[ag.clienteUid].ultimoCorte) {
+          clientesMap[ag.clienteUid].ultimoCorte = ag.ts.seconds;
+        }
+      });
+
+      lista.innerHTML = "";
+      if (clientes.size === 0) {
+        lista.innerHTML = "<p>Você ainda não tem clientes.</p>";
+        return;
+      }
+      
+      Object.keys(clientesMap).forEach(clienteUid => {
+        const cliente = clientesMap[clienteUid];
+        lista.innerHTML += `<div class="card">
+          <b>${cliente.nome}</b>
+          <p>Cortes realizados: ${cliente.totalCortes}</p>
+        </div>`;
+      });
+    });
+}
+
+function abrirFinancasBarbeiro() {
+  document.getElementById("conteudoBarbeiro").innerHTML = `
+    <h3>📈 Minhas Finanças</h3>
+    <div id="financasPainel" class="card">
+      <p>Saldo: <b>R$ <span id="saldoAtual">0.00</span></b></p>
+      <p>Cortes esta semana: <b id="cortesSemana">0</b></p>
+      <p>Taxa por agendamento: ${TAXA * 100}%</p>
+      <button onclick="abrirModal('modalCarteira')">💰 Ir para a Carteira</button>
+    </div>
+  `;
+  db.collection("usuarios").doc(auth.currentUser.uid).onSnapshot(doc => {
+    const p = doc.data();
+    document.getElementById("saldoAtual").textContent = (p.saldo || 0).toFixed(2);
+    document.getElementById("cortesSemana").textContent = p.cortesSemana || 0;
+  });
+}
+
+function abrirPromocoes() {
+  document.getElementById("conteudoBarbeiro").innerHTML = `
+    <h3>🎁 Minhas Promoções</h3>
+    <div id="listaPromocoes" class="scrollable-list"></div>
+    <button onclick="abrirModal('modalCriarPromocao')">+ Criar nova promoção</button>
+  `;
+  listarPromocoes();
+}
+
+function listarPromocoes() {
+  const lista = document.getElementById("listaPromocoes");
+  lista.innerHTML = "<p>⏳ Carregando promoções...</p>";
+  db.collection("usuarios").doc(auth.currentUser.uid).onSnapshot(doc => {
+    const p = doc.data();
+    perfil = p;
+    lista.innerHTML = "";
+    if (!p.promocoes || p.promocoes.length === 0) {
+      lista.innerHTML = "<p>Nenhuma promoção ativa.</p>";
+      return;
+    }
+    p.promocoes.forEach((promocao, index) => {
+      lista.innerHTML += `<div class="promocao-card">
+        <b>${promocao.nome}</b>
+        <p>${promocao.descricao} (${promocao.desconto}%)</p>
+        <button onclick="removerPromocao(${index})" style="background:none;border:none;color:#fff;float:right;">❌</button>
+      </div>`;
+    });
+  });
+}
+
+function criarPromocao() {
+  const nome = document.getElementById("promocaoNome").value;
+  const descricao = document.getElementById("promocaoDescricao").value;
+  const desconto = parseInt(document.getElementById("promocaoDesconto").value);
+
+  if (!nome || !descricao || isNaN(desconto) || desconto <= 0 || desconto > 100) {
+    return alert("Preencha os campos corretamente.");
+  }
+
+  const promocao = { nome, descricao, desconto };
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    promocoes: firebase.firestore.FieldValue.arrayUnion(promocao)
+  }).then(() => {
+    alert("Promoção criada com sucesso!");
+    fecharModal({ target: document.getElementById('modalCriarPromocao') });
+  }).catch(e => alert("Erro ao criar promoção: " + e.message));
+}
+
+function removerPromocao(index) {
+  const promocaoParaRemover = perfil.promocoes[index];
+  if (!confirm(`Deseja remover a promoção "${promocaoParaRemover.nome}"?`)) return;
+
+  db.collection("usuarios").doc(auth.currentUser.uid).update({
+    promocoes: firebase.firestore.FieldValue.arrayRemove(promocaoParaRemover)
+  }).then(() => {
+    alert("Promoção removida com sucesso!");
+  }).catch(e => alert("Erro ao remover promoção: " + e.message));
+}
+
+function abrirAvaliacoesBarbeiro() {
+  abrirModal('modalAvaliacoes');
+  const lista = document.getElementById("listaAvaliacoesModal");
+  lista.innerHTML = "<p>⏳ Carregando avaliações...</p>";
+  db.collection("avaliacoes")
+    .where("barbeiroUid", "==", auth.currentUser.uid)
+    .orderBy("ts", "desc")
+    .onSnapshot(snap => {
+      lista.innerHTML = "";
+      if (snap.empty) {
+        lista.innerHTML = "<p>Nenhuma avaliação recebida ainda.</p>";
+        return;
+      }
+      snap.forEach(async (doc) => {
+        const a = doc.data();
+        const estrelas = '⭐'.repeat(Math.round(a.nota / 2));
+        
+        let clienteNome = "Cliente Anônimo";
+        try {
+            if (a.clienteUid) {
+                const clienteDoc = await db.collection("usuarios").doc(a.clienteUid).get();
+                if (clienteDoc.exists) {
+                    clienteNome = clienteDoc.data().nome;
+                }
+            }
+        } catch(e) {
+            console.error("Não foi possível buscar o nome do cliente:", e);
+        }
+
+        const reviewCard = document.createElement('div');
+        reviewCard.className = 'card';
+        reviewCard.style.marginBottom = '15px';
+        reviewCard.innerHTML = `
+          <p style="margin-bottom: 5px;"><b>De:</b> ${clienteNome}</p>
+          <b>Nota: ${a.nota}/10</b> (${estrelas})<br>
+          <p style="margin-top: 5px;"><b>Comentário:</b> "${a.comentario}"</p>
+        `;
+        lista.appendChild(reviewCard);
+      });
+    });
+}
+
+// Função para enviar uma notificação para um token específico
+// O nome da função está em inglês para se alinhar com o código que você me enviou.
+async function sendNotification_DEPRECATED(token, title, body) {
+  const backendUrl = "https://navalhabackend-2.onrender.com"; // SUBSTITUA PELA URL DO SEU BACKEND
+  try {
+    const response = await fetch(backendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        token: token,
+        title: title,
+        body: body,
+      }),
+    });
+
+    const data = await response.json();
+    if (response.ok) {
+      console.log('Notificação enviada com sucesso:', data.messageId);
+      // Você pode adicionar um alerta ou modal de sucesso aqui
+    } else {
+      console.error('Falha ao enviar a notificação:', data.error);
+      // Exibir um alerta de erro
+    }
+  } catch (error) {
+    console.error('Erro de rede ou na chamada da API:', error);
+  }
+}
+
+async function solicitarDeposito() {
+  const valor = parseFloat(prompt("Valor do depósito:"));
+  if (isNaN(valor) || valor <= 0) {
+    return alert("Valor inválido.");
+  }
+  
+  try {
+    const solicitacoesRef = await db.collection("solicitacoes").add({
+        tipo: "deposito",
+        valor,
+        usuarioUid: auth.currentUser.uid,
+        usuarioNome: perfil.nome,
+        status: "pendente",
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    abrirModal('modalDeposito');
+    const btnWhatsapp = document.getElementById("btnWhatsappDeposito");
+    const mensagem = encodeURIComponent(`Olá, acabei de solicitar um depósito de R$ ${valor.toFixed(2)} no app. ID: ${solicitacoesRef.id}`);
+    btnWhatsapp.href = `https://wa.me/${WHATSAPP_ADM_PHONE}?text=${mensagem}`;
+    
+    criarAviso(ADMIN_EMAIL, `📥 Nova solicitação de depósito de ${perfil.nome} no valor de R$ ${valor.toFixed(2)}.`);
+    // NOTIFICAÇÃO
+    notifyAdmins("💰 Solicitação de Depósito", `${perfil.nome} solicitou um depósito de R$ ${valor.toFixed(2)}.`);
+  } catch(e) {
+      alert("Ocorreu um erro ao enviar sua solicitação. Por favor, tente novamente. Detalhes: " + e.message);
+      console.error("Erro ao criar solicitação de depósito:", e);
+  }
+}
+
+async function solicitarSaque() {
+  const valor = parseFloat(prompt("Valor do saque:"));
+  if (isNaN(valor) || valor <= 0) {
+    return alert("Valor inválido.");
+  }
+  if ((perfil.saldo || 0) < valor) {
+    return alert("💸 Saldo insuficiente para saque.");
+  }
+  const chavePix = prompt("Chave Pix para o saque:");
+  if (!chavePix) {
+    return alert("Chave Pix é obrigatória.");
+  }
+  const nomeRecebedor = prompt("Nome do recebedor (nome completo):");
+  if (!nomeRecebedor) {
+    return alert("O nome do recebedor é obrigatório.");
+  }
+  
+  if (!confirm(`Deseja solicitar o saque de R$ ${valor.toFixed(2)} para a chave Pix "${chavePix}" em nome de "${nomeRecebedor}"?`)) return;
+  
+  try {
+    const solicitacoesRef = await db.collection("solicitacoes").add({
+        tipo: "saque",
+        valor,
+        chavePix,
+        nomeRecebedor,
+        usuarioUid: auth.currentUser.uid,
+        usuarioNome: perfil.nome,
+        status: "pendente",
+        ts: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    
+    abrirModal('modalSaqueEnviado');
+    const btnWhatsapp = document.getElementById("btnWhatsappSaque");
+    const mensagem = encodeURIComponent(`Olá, acabei de solicitar um saque de R$ ${valor.toFixed(2)} no app. ID: ${solicitacoesRef.id}\n\nChave Pix: ${chavePix}\nNome: ${nomeRecebedor}\n\nPor favor, aprovar e enviar o valor.`);
+    btnWhatsapp.href = `https://wa.me/${WHATSAPP_ADM_PHONE}?text=${mensagem}`;
+
+    criarAviso(ADMIN_EMAIL, `📤 Nova solicitação de saque de ${perfil.nome} no valor de R$ ${valor.toFixed(2)}.`);
+    // NOTIFICAÇÃO
+    notifyAdmins("🏧 Solicitação de Saque", `${perfil.nome} solicitou um saque de R$ ${valor.toFixed(2)}.`);
+  } catch(e) {
+      alert("Ocorreu um erro ao enviar sua solicitação de saque. Por favor, tente novamente. Detalhes: " + e.message);
+      console.error("Erro ao criar solicitação de saque:", e);
+  }
+}
+
+async function publicarBlog() {
+  const titulo = document.getElementById("blogTitulo").value.trim();
+  const conteudo = document.getElementById("blogConteudo").value.trim();
+  if (!titulo || !conteudo) return alert("Preencha todos os campos.");
+
+  await db.collection("blog").add({
+    titulo,
+    conteudo,
+    autor: perfil.nome,
+    autorUid: auth.currentUser.uid,
+    ts: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  alert("Postagem publicada!");
+  fecharModal({ target: document.getElementById('modalBlogAdmin') });
+}
+
+function carregarListaBlog() {
+  const lista = document.getElementById("listaBlog");
+  lista.innerHTML = "<p>⏳ Carregando posts...</p>";
+  db.collection("blog").orderBy("ts", "desc").onSnapshot(snap => {
+    lista.innerHTML = "";
+    if (snap.empty) {
+      lista.innerHTML = "<p>Nenhum post no blog ainda.</p>";
+      return;
+    }
+    const agora = new Date();
+    const vinteQuatroHorasAtras = agora.getTime() - (24 * 60 * 60 * 1000);
+    
+    snap.forEach(doc => {
+      const p = doc.data();
+      if (p.ts && p.ts.toDate().getTime() > vinteQuatroHorasAtras) {
+        lista.innerHTML += `<div class="card" style="margin-bottom:15px;">
+          <h4>${p.titulo}</h4>
+          <p>${p.conteudo}</p>
+          <p style="font-size:12px;opacity:0.7;">Por: ${p.autor}</p>
+        </div>`;
+      }
+    });
+
+    if (lista.innerHTML === "") {
+        lista.innerHTML = "<p>Nenhum post recente no blog. As postagens expiram em 24 horas.</p>";
+    }
+  });
+}
+
+function carregarAdmin() {
+    document.getElementById("conteudoAdmin").innerHTML = "<p>👈 Escolha uma opção acima</p>";
+
+    if (adminBalanceListener) adminBalanceListener(); 
+    
+    db.collection("usuarios").get().then(snapshot => {
+        snapshot.forEach(doc => {
+            adminUserBalances[doc.id] = doc.data().saldo || 0;
+        });
+
+        adminBalanceListener = db.collection("usuarios").onSnapshot(snap => {
+            snap.docChanges().forEach(change => {
+                if (change.type === "modified") {
+                    const novoUsuario = change.doc.data();
+                    const id = change.doc.id;
+                    const saldoAntigo = adminUserBalances[id] || 0;
+                    const saldoNovo = novoUsuario.saldo || 0;
+
+                    const antigoMultiplo100 = Math.floor(saldoAntigo / 100);
+                    const novoMultiplo100 = Math.floor(saldoNovo / 100);
+
+                    if (novoMultiplo100 > antigoMultiplo100) {
+                        alert(`⚠️ Alerta de Saldo!\n\nO usuário ${novoUsuario.nome} ultrapassou R$${novoMultiplo100 * 100} em sua carteira.`);
+                    }
+                    
+                    adminUserBalances[id] = saldoNovo;
+                }
+            });
+        });
+    });
+}
+
+
+function abrirModalEstatisticas() {
+    abrirModal('modalEstatisticas');
+    const painel = document.getElementById("estatisticasPainel");
+    painel.innerHTML = "<p>⏳ Carregando...</p>";
+
+    db.collection("usuarios").get().then(snap => {
+        let clientes = 0, barbeiros = 0, vip = 0;
+        snap.forEach(doc => {
+            const u = doc.data();
+            if (u.tipo === "cliente") clientes++;
+            if (u.tipo === "barbeiro") barbeiros++;
+            if (u.vip) vip++;
+        });
+
+        let html = `
+            <p>Total de Usuários: <b>${snap.size}</b></p>
+            <p>Clientes: <b>${clientes}</b></p>
+            <p>Barbeiros: <b>${barbeiros}</b></p>
+            <p>Membros VIP: <b>${vip}</b></p>
+            <hr>
+        `;
+        painel.innerHTML = html;
+
+        db.collection("config").doc("financeiro").onSnapshot(financeiroDoc => {
+            const fin = financeiroDoc.data() || {};
+            const arrecadadoTaxas = fin.arrecadadoTaxas || 0;
+            const arrecadadoVip = fin.arrecadadoVip || 0;
+            
+            const finDiv = document.getElementById("fin-div");
+            if (finDiv) finDiv.remove();
+
+            painel.innerHTML += `
+                <div id="fin-div">
+                    <h4>Arrecadação Total</h4>
+                    <p>Com Taxas de Serviço: <b>R$ ${arrecadadoTaxas.toFixed(2)}</b></p>
+                    <p>Com Assinaturas VIP: <b>R$ ${arrecadadoVip.toFixed(2)}</b></p>
+                </div>
+            `;
+        });
+    });
+}
+
+
+function abrirModalSolicitacoes() {
+  abrirModal('modalSolicitacoes');
+  const lista = document.getElementById("listaSolicitacoes");
+  lista.innerHTML = "<p>⏳ Carregando...</p>";
+  db.collection("solicitacoes")
+    .where("status", "==", "pendente")
+    .orderBy("ts", "desc")
+    .onSnapshot(snap => {
+      lista.innerHTML = "";
+      if (snap.empty) {
+        lista.innerHTML = "<p>Nenhuma solicitação pendente encontrada.</p>";
+        return;
+      }
+      snap.forEach(doc => {
+        const s = doc.data();
+        let statusClass = '';
+        if (s.status === 'aprovado') {
+            statusClass = 'color: #4CAF50;';
+        } else if (s.status === 'recusado') {
+            statusClass = 'color: #f44336;';
+        } else {
+            statusClass = 'color: #ff9800;';
+        }
+        lista.innerHTML += `<div class="card" onclick="verDetalhesSolicitacao('${doc.id}')">
+          <b>${s.tipo.toUpperCase()}</b> de ${s.usuarioNome}<br>
+          <p>Valor: R$ ${s.valor.toFixed(2)}</p>
+          <p style="${statusClass}">Status: <b>${s.status.toUpperCase()}</b></p>
+        </div>`;
+      });
+    });
+}
+
+async function verDetalhesSolicitacao(solicitacaoId) {
+  const solicitacaoDoc = await db.collection("solicitacoes").doc(solicitacaoId).get();
+  const s = solicitacaoDoc.data();
+  if (!s) return;
+  
+  if (s.status !== 'pendente') {
+      alert(`Esta solicitação já foi ${s.status}. Nenhuma ação pode ser tomada.`);
+      return;
+  }
+
+  const confirmar = confirm(`Detalhes da Solicitação:\n\nTipo: ${s.tipo}\nUsuário: ${s.usuarioNome}\nValor: R$ ${s.valor.toFixed(2)}\n\n${s.tipo === 'saque' ? `Chave Pix: ${s.chavePix}\nNome Recebedor: ${s.nomeRecebedor}\n\n` : ''}Deseja aprovar esta solicitação?`);
+  if (confirmar) {
+    if (s.tipo === "deposito") {
+      aprovarDeposito(solicitacaoId, s.usuarioUid, s.valor);
+    } else if (s.tipo === "saque") {
+      aprovarSaque(solicitacaoId, s.usuarioUid, s.valor);
+    }
+  } else {
+    if (confirm("Deseja recusar a solicitação?")) {
+      recusarSolicitacao(solicitacaoId, s.usuarioUid, s.tipo);
+    }
+  }
+}
+
+function aprovarDeposito(solicitacaoId, usuarioUid, valor) {
+  db.runTransaction(t => {
+    const solicitacaoRef = db.collection("solicitacoes").doc(solicitacaoId);
+    const usuarioRef = db.collection("usuarios").doc(usuarioUid);
+    return t.get(usuarioRef).then(doc => {
+      const saldoAtual = doc.data().saldo || 0;
+      const pontosGanhos = Math.floor(valor / 10) * (doc.data().vip ? PONTOS_POR_DEPOSITO_VIP : PONTOS_POR_DEPOSITO_NORMAL);
+
+      t.update(usuarioRef, { saldo: saldoAtual + valor, pontosFidelidade: firebase.firestore.FieldValue.increment(pontosGanhos) });
+      t.update(solicitacaoRef, { status: "aprovado" });
+
+      if (pontosGanhos > 0) {
+        // NOTIFICAÇÃO DE PONTOS
+        notifyUser(usuarioUid, "🏆 Você Ganhou Pontos!", `+${pontosGanhos} pontos de fidelidade adicionados pelo seu depósito.`);
+      }
+    });
+  }).then(() => {
+    alert("Depósito aprovado com sucesso!");
+    criarAviso(usuarioUid, `✅ Seu depósito de R$ ${valor.toFixed(2)} foi creditado na sua carteira.`);
+    // NOTIFICAÇÃO
+    notifyUser(usuarioUid, "✅ Pagamento Recebido!", `Seu depósito de R$ ${valor.toFixed(2)} foi aprovado e adicionado à sua carteira.`);
+  }).catch(e => alert("Erro ao aprovar: " + e.message));
+}
+
+function aprovarSaque(solicitacaoId, usuarioUid, valor) {
+  db.runTransaction(t => {
+    const solicitacaoRef = db.collection("solicitacoes").doc(solicitacaoId);
+    const usuarioRef = db.collection("usuarios").doc(usuarioUid);
+    return t.get(usuarioRef).then(doc => {
+      const saldoAtual = doc.data().saldo || 0;
+      if (saldoAtual < valor) {
+        throw "Saldo do usuário insuficiente.";
+      }
+      t.update(usuarioRef, { saldo: saldoAtual - valor });
+      t.update(solicitacaoRef, { status: "aprovado" });
+    });
+  }).then(() => {
+    alert("Saque aprovado com sucesso!");
+    criarAviso(usuarioUid, `✅ Seu saque de R$ ${valor.toFixed(2)} foi aprovado e o valor será enviado para sua conta.`);
+    // NOTIFICAÇÃO
+    notifyUser(usuarioUid, "💸 Saque Aprovado!", `Sua solicitação de saque de R$ ${valor.toFixed(2)} foi processada.`);
+  }).catch(e => alert("Erro ao aprovar: " + e.message));
+}
+
+function recusarSolicitacao(solicitacaoId, usuarioUid, tipo) {
+  db.collection("solicitacoes").doc(solicitacaoId).update({ status: "recusado" })
+    .then(() => {
+      alert("Solicitação recusada.");
+      criarAviso(usuarioUid, `❌ Sua solicitação de ${tipo} foi recusada.`);
+      // NOTIFICAÇÃO
+      notifyUser(usuarioUid, `❌ Solicitação Recusada`, `Sua solicitação de ${tipo} foi recusada pelo administrador.`);
+    }).catch(e => alert("Erro: " + e.message));
+}
+
+function abrirModalUsuarios() {
+  abrirModal('modalUsuarios');
+  const lista = document.getElementById("usuariosPainel");
+  lista.innerHTML = "<p>⏳ Carregando...</p>";
+  db.collection("usuarios").onSnapshot(snap => {
+    lista.innerHTML = "";
+    if (snap.empty) {
+      lista.innerHTML = "<p>Nenhum usuário cadastrado.</p>";
+      return;
+    }
+    snap.forEach(doc => {
+      const u = doc.data();
+      lista.innerHTML += `<div class="card">
+        <b>${u.nome}</b> (${u.tipo})
+        <p>Email: ${u.email}</p>
+        <p>Telefone: ${u.telefone}</p>
+        <button onclick="verDetalhesUsuario('${doc.id}')">Gerenciar</button>
+      </div>`;
+    });
+  });
+}
+
+function abrirDenuncias() {
+  document.getElementById("conteudoAdmin").innerHTML = `
+    <h3>🚨 Denúncias</h3>
+    <div id="listaDenuncias" class="scrollable-list"></div>
+  `;
+  const lista = document.getElementById("listaDenuncias");
+  lista.innerHTML = "<p>⏳ Carregando...</p>";
+  db.collection("denuncias")
+    .where("status", "==", "aberta")
+    .orderBy("ts", "desc")
+    .onSnapshot(snap => {
+      lista.innerHTML = "";
+      if (snap.empty) {
+        lista.innerHTML = "<p>Nenhuma denúncia aberta.</p>";
+        return;
+      }
+      snap.forEach(doc => {
+        const d = doc.data();
+        lista.innerHTML += `<div class="card" onclick="verDetalhesDenuncia('${doc.id}')">
+          <b>Denúncia de ${d.usuarioNome}</b>
+          <p>${d.texto.substring(0, 50)}...</p>
+        </div>`;
+      });
+    });
+}
+
+async function verDetalhesDenuncia(denunciaId) {
+  const denunciaDoc = await db.collection("denuncias").doc(denunciaId).get();
+  const d = denunciaDoc.data();
+  if (!d) return;
+
+  const confirmar = confirm(`Detalhes da Denúncia:\n\nUsuário: ${d.usuarioNome}\nTexto: ${d.texto}\n\nDeseja fechar esta denúncia?`);
+  if (confirmar) {
+    fecharDenuncia(denunciaId);
+  }
+}
+
+function fecharDenuncia(denunciaId) {
+  db.collection("denuncias").doc(denunciaId).update({ status: "fechada" })
+    .then(() => alert("Denúncia fechada com sucesso!"));
+}
+
+async function verDetalhesUsuario(usuarioUid) {
+  const usuarioDoc = await db.collection("usuarios").doc(usuarioUid).get();
+  const u = usuarioDoc.data();
+  if (!u) return;
+  
+  const menu = `Gerenciando: ${u.nome} (${u.email})\n` +
+      `Telefone: ${u.telefone}\n` +
+      `Saldo: R$ ${(u.saldo || 0).toFixed(2)}\n\n` +
+      `1. Mudar tipo (atual: ${u.tipo})\n` +
+      `2. Modificar Saldo\n` +
+      `3. Mudar Status VIP (atual: ${u.vip ? 'Sim' : 'Não'})\n` +
+      `4. Ativar/Desativar Chat (atual: ${u.chatAtivo ? 'Ativo' : 'Inativo'})\n` +
+      `5. Chamar no WhatsApp\n` +
+      `6. DELETAR USUÁRIO\n\n` +
+      `Escolha uma opção (ou cancele):`;
+
+  const acao = prompt(menu);
+
+  switch(acao) {
+    case "1":
+        const novoTipo = prompt("Digite o novo tipo (cliente, barbeiro, admin):");
+        if (["cliente", "barbeiro", "admin"].includes(novoTipo)) {
+            await db.collection("usuarios").doc(usuarioUid).update({ tipo: novoTipo });
+            criarAviso(usuarioUid, `Seu tipo de conta foi alterado para ${novoTipo} por um administrador.`);
+            alert("Tipo de usuário alterado!");
+        } else {
+            alert("Tipo inválido.");
+        }
+        break;
+    case "2":
+        const valorStr = prompt("Digite o valor para adicionar ao saldo (use '-' para remover):");
+        const valor = parseFloat(valorStr);
+        if (!isNaN(valor)) {
+            await db.collection("usuarios").doc(usuarioUid).update({ saldo: firebase.firestore.FieldValue.increment(valor) });
+            const acaoTexto = valor > 0 ? `adicionado à` : `removido da`;
+            criarAviso(usuarioUid, `O valor de R$ ${Math.abs(valor).toFixed(2)} foi ${acaoTexto} sua carteira por um administrador.`);
+            // NOTIFICAÇÃO
+            notifyUser(usuarioUid, "💸 Nova Transação!", `Um administrador alterou seu saldo em R$ ${valor.toFixed(2)}.`);
+            alert("Saldo alterado!");
+        } else {
+            alert("Valor inválido.");
+        }
+        break;
+    case "3":
+        const novoVipStatus = !u.vip;
+        await db.collection("usuarios").doc(usuarioUid).update({ vip: novoVipStatus });
+        criarAviso(usuarioUid, `Seu status VIP foi ${novoVipStatus ? 'ativado' : 'desativado'} por um administrador.`);
+        alert("Status VIP alterado!");
+        break;
+    case "4":
+        const novoChatStatus = !u.chatAtivo;
+        await db.collection("usuarios").doc(usuarioUid).update({ chatAtivo: novoChatStatus });
+        criarAviso(usuarioUid, `Seu acesso ao chat foi ${novoChatStatus ? 'ativado' : 'desativado'} por um administrador.`);
+        alert("Status do chat alterado!");
+        break;
+    case "5":
+        if(u.telefone) {
+            window.open(`https://wa.me/55${u.telefone}`, '_blank');
+        } else {
+            alert("Usuário não possui telefone cadastrado.");
+        }
+        break;
+    case "6":
+        const confirmacao = prompt(`TEM CERTEZA? Esta ação é irreversível. Para deletar o usuário ${u.nome}, digite "DELETAR":`);
+        if (confirmacao === "DELETAR") {
+            try {
+                await db.collection("usuarios").doc(usuarioUid).delete();
+                alert("Usuário deletado do banco de dados!");
+            } catch (e) {
+                alert("Erro ao deletar usuário: " + e.message);
+            }
+        } else {
+            alert("Exclusão cancelada.");
+        }
+        break;
+    default:
+        break;
+  }
+}
+// NOVO: Bloco de código para configurar as notificações
+function setupFCM(uid) {
+    // Verifica se o navegador suporta notificações
+    if (!firebase.messaging.isSupported()) {
+        console.log("Este navegador não suporta notificações em tempo real.");
+        return;
+    }
+
+    // Solicita permissão ao usuário
+    messaging.requestPermission().then(() => {
+        console.log("Permissão para notificações concedida.");
+        // Obtém o token do dispositivo. É aqui que você deve inserir sua chave VAPID.
+        return messaging.getToken({ vapidKey: 'BGkXq9v27VKT9Tl1DF2QBhP3c77lF4xDdptbay3jaKtlhw-5-G6D2GP7qcsjlweme9WggzBipoCDulIdSiuEfPE' });
+    }).then(token => {
+        if (token) {
+            console.log("Token do dispositivo (FCM Token):", token);
+            
+            // Salva o token no perfil do usuário no Firestore para que você possa enviar notificações para ele
+            const userRef = db.collection("usuarios").doc(uid);
+            userRef.update({
+                // Usamos 'arrayUnion' para adicionar o token sem duplicar, caso ele já exista.
+                // Isso também permite que um usuário tenha tokens de múltiplos dispositivos (celular, computador).
+                fcmTokens: firebase.firestore.FieldValue.arrayUnion(token)
+            }).then(() => {
+                console.log("Token salvo no perfil do usuário com sucesso.");
+            }).catch(err => {
+                console.error("Erro ao salvar o token no Firestore:", err);
+            });
+        } else {
+            console.warn("Não foi possível obter o token. O usuário pode ter negado a permissão.");
+        }
+    }).catch(err => {
+        console.error("Ocorreu um erro ao solicitar permissão ou obter o token:", err);
+    });
+}
+
+// NOVO: Manipulador para mensagens recebidas enquanto o usuário está com o app aberto (em primeiro plano)
+if (firebase.messaging.isSupported()) {
+    messaging.onMessage((payload) => {
+        console.log('Mensagem recebida com o app aberto:', payload);
+        // Exibe um alerta simples com o título e o corpo da notificação
+        alert(`🔔 ${payload.notification.title}\n\n${payload.notification.body}`);
+    });
+}
+</script>
+    <script>
+        // Registra o seu Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/service-worker.js').then(function(registration) {
+                    console.log('Service Worker registrado com sucesso:', registration.scope);
+                }, function(err) {
+                    console.log('Falha ao registrar o Service Worker:', err);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
