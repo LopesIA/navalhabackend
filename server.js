@@ -1,45 +1,56 @@
-// server.js
 const express = require('express');
 const admin = require('firebase-admin');
 
-const app = express();
-app.use(express.json());
+// Substitua com as suas credenciais do Firebase Admin SDK
+// Você pode obter este arquivo JSON no painel do Firebase, em:
+// Configurações do projeto > Contas de Serviço > Gerar nova chave privada
+const serviceAccount = require('./caminho/para/seu/arquivo.json');
 
-// IMPORTANTE: Configure a sua chave de serviço
-// Vamos obter isso de uma variável de ambiente no Render por segurança
-// O Render armazena a sua chave privada aqui, não no código!
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
-// Endpoint para enviar uma notificação
-app.post('/send-notification', async (req, res) => {
-    try {
-        const { fcmToken, title, body } = req.body;
+const app = express();
+app.use(express.json());
 
-        if (!fcmToken || !title || !body) {
-            return res.status(400).send('Dados de notificação incompletos.');
-        }
+// Rota para enviar a notificação
+app.post('/enviar-notificacao', (req, res) => {
+  const { token, titulo, corpo } = req.body;
 
-        const message = {
-            notification: {
-                title: title,
-                body: body,
-            },
-            token: fcmToken,
-        };
+  if (!token || !titulo || !corpo) {
+    return res.status(400).send({
+      success: false,
+      message: 'Token, título e corpo são obrigatórios'
+    });
+  }
 
-        const response = await admin.messaging().send(message);
-        console.log('Notificação enviada com sucesso:', response);
-        res.status(200).send('Notificação enviada!');
-    } catch (error) {
-        console.error('Erro ao enviar notificação:', error);
-        res.status(500).send('Erro ao enviar notificação.');
+  const message = {
+    token: token,
+    notification: {
+      title: titulo,
+      body: corpo
     }
+  };
+
+  admin.messaging().send(message)
+    .then((response) => {
+      console.log('Mensagem enviada com sucesso:', response);
+      res.status(200).send({
+        success: true,
+        message: 'Notificação enviada com sucesso!'
+      });
+    })
+    .catch((error) => {
+      console.error('Erro ao enviar a notificação:', error);
+      res.status(500).send({
+        success: false,
+        message: 'Falha ao enviar a notificação',
+        error: error.message
+      });
+    });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Servidor rodando na porta ${port}`);
 });
