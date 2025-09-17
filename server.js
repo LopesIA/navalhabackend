@@ -19,22 +19,22 @@ app.use(express.json());
 
 // Rota para enviar a notificação
 app.post('/enviar-notificacao', (req, res) => {
-  const { token, titulo, corpo } = req.body;
+  const { token, title, body } = req.body;
 
-  if (!token || !title || !body) {
-    return res.status(400).send({
-      success: false,
-      message: 'Token, título e corpo são obrigatórios'
-    });
+if (!token || !title || !body) {
+  return res.status(400).send({
+    success: false,
+    message: 'Token, title e body são obrigatórios'
+  });
+}
+
+const message = {
+  token: token,
+  notification: {
+    title: title,
+    body: body
   }
-
-  const message = {
-    token: token,
-    notification: {
-      title: titulo,
-      body: corpo
-    }
-  };
+};
 
   admin.messaging().send(message)
     .then((response) => {
