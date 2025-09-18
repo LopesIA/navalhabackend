@@ -4,6 +4,7 @@ const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
 
+// Certifique-se de que a variável de ambiente está configurada no Render.com
 const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
 admin.initializeApp({
@@ -54,6 +55,7 @@ app.post('/enviar-notificacao', async (req, res) => {
     }
     res.status(200).send({ success: true, message: 'Notificações enviadas!', ...response });
   } catch (error) {
+    console.error("Erro em /enviar-notificacao:", error);
     res.status(500).send({ success: false, message: 'Erro interno ao enviar notificação.' });
   }
 });
@@ -94,6 +96,7 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
         }
         res.status(200).send({ success: true, message: 'Notificações de marketing enviadas!', totalTokens: uniqueTokens.length, successCount, failureCount });
     } catch (error) {
+        console.error("Erro em /enviar-notificacao-massa:", error);
         res.status(500).send({ success: false, message: 'Erro interno ao enviar notificação em massa.' });
     }
 });
@@ -107,7 +110,7 @@ async function verificarLembretesDeAgendamento() {
         if (agendamentosSnapshot.empty) return;
         agendamentosSnapshot.forEach(async doc => {
             const agendamento = doc.data();
-            if (!agendamento.horario) return;
+            if (!agendamento.horario || !agendamento.confirmadoEm) return;
             const [horas, minutos] = agendamento.horario.split(':');
             const dataAgendamento = new Date(agendamento.confirmadoEm.toDate());
             dataAgendamento.setHours(horas, minutos, 0, 0);
@@ -144,55 +147,99 @@ async function postarMensagemDiariaBlog() {
     } catch (error) { console.error('Erro ao postar no blog:', error); }
 }
 
-// ATUALIZADO: Lógica de Ranking por Cortes/Agendamentos Concluídos
+// ATUALIZADO: Funções de Ranking mais robustas e com logs detalhados
 async function calcularRankingClientes() {
     try {
-        const usuariosSnapshot = await db.collection('usuarios')
-            .where('tipo', '==', 'cliente')
-            .orderBy('cortesRealizados', 'desc')
-            .limit(10)
-            .get();
-        
-        const ranking = usuariosSnapshot.docs.map(doc => {
-            const user = doc.data();
-            return { uid: doc.id, nome: user.nome, contagem: user.cortesRealizados || 0 };
+        console.log('[Ranking Clientes] Iniciando cálculo...');
+        const usuariosSnapshot = await db.collection('usuarios').where('tipo', '==', 'cliente').get();
+
+        if (usuariosSnapshot.empty) {
+            console.log('[Ranking Clientes] Nenhum usuário do tipo "cliente" encontrado.');
+            await db.collection('config').doc('rankingClientes').set({
+                ranking: [],
+                atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+            });
+            return;
+        }
+
+        console.log(`[Ranking Clientes] ${usuariosSnapshot.size} clientes encontrados.`);
+        const users = [];
+        usuariosSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data && data.nome) { // Garante que o usuário tem os dados mínimos
+                users.push({
+                    uid: doc.id,
+                    nome: data.nome,
+                    contagem: data.cortesRealizados || 0
+                });
+            } else {
+                 console.warn(`[Ranking Clientes] Documento ${doc.id} ignorado por falta de dados (nome).`);
+            }
         });
 
-        await db.collection('config').doc('rankingClientes').set({ 
-            ranking, 
-            atualizadoEm: admin.firestore.FieldValue.serverTimestamp() 
+        const ranking = users
+            .sort((a, b) => b.contagem - a.contagem)
+            .slice(0, 100);
+
+        console.log(`[Ranking Clientes] Ranking final com ${ranking.length} usuários calculado.`);
+
+        await db.collection('config').doc('rankingClientes').set({
+            ranking,
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
         });
-        console.log('Ranking de clientes (por agendamentos) atualizado.');
-    } catch (error) { 
-        console.error('Erro ao calcular ranking de clientes:', error); 
+        console.log('[Ranking Clientes] Ranking de clientes (Top 100) salvo com sucesso.');
+    } catch (error) {
+        console.error('[Ranking Clientes] Erro CRÍTICO ao calcular ranking de clientes:', error);
     }
 }
 
 async function calcularRankingBarbeiros() {
     try {
-        const barbeirosSnapshot = await db.collection('usuarios')
-            .where('tipo', '==', 'barbeiro')
-            .orderBy('clientesAtendidos', 'desc')
-            .limit(10)
-            .get();
+        console.log('[Ranking Barbeiros] Iniciando cálculo...');
+        const barbeirosSnapshot = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
+        
+        if (barbeirosSnapshot.empty) {
+            console.log('[Ranking Barbeiros] Nenhum usuário do tipo "barbeiro" encontrado.');
+             await db.collection('config').doc('rankingBarbeiros').set({
+                ranking: [],
+                atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+            });
+            return;
+        }
 
-        const ranking = barbeirosSnapshot.docs.map(doc => {
-            const user = doc.data();
-            return { uid: doc.id, nome: user.nome, contagem: user.clientesAtendidos || 0 };
+        console.log(`[Ranking Barbeiros] ${barbeirosSnapshot.size} barbeiros encontrados.`);
+        const users = [];
+        barbeirosSnapshot.forEach(doc => {
+            const data = doc.data();
+             if (data && data.nome) { // Garante que o usuário tem os dados mínimos
+                users.push({
+                    uid: doc.id,
+                    nome: data.nome,
+                    contagem: data.clientesAtendidos || 0
+                });
+            } else {
+                 console.warn(`[Ranking Barbeiros] Documento ${doc.id} ignorado por falta de dados (nome).`);
+            }
         });
 
-        await db.collection('config').doc('rankingBarbeiros').set({ 
-            ranking, 
-            atualizadoEm: admin.firestore.FieldValue.serverTimestamp() 
+       const ranking = users
+            .sort((a, b) => b.contagem - a.contagem)
+            .slice(0, 100);
+            
+        console.log(`[Ranking Barbeiros] Ranking final com ${ranking.length} usuários calculado.`);
+
+        await db.collection('config').doc('rankingBarbeiros').set({
+            ranking,
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
         });
-        console.log('Ranking de barbeiros (por cortes) atualizado.');
-    } catch (error) { 
-        console.error('Erro ao calcular ranking de barbeiros:', error); 
+        console.log('[Ranking Barbeiros] Ranking de barbeiros (Top 100) salvo com sucesso.');
+    } catch (error) {
+        console.error('[Ranking Barbeiros] Erro CRÍTICO ao calcular ranking de barbeiros:', error);
     }
 }
 
 
-// --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (ADMIN) ---
+// FUNÇÃO PARA VERIFICAR PENDÊNCIAS (ADMIN)
 async function verificarPendencias() {
     try {
         const pendentes = await db.collection('solicitacoes').where('status', '==', 'pendente').get();
@@ -211,7 +258,7 @@ async function verificarPendencias() {
     } catch (error) { console.error('Erro ao verificar pendências:', error); }
 }
 
-// --- FUNÇÃO PARA NOTIFICAR BARBEIROS SOBRE AGENDAMENTOS PENDENTES ---
+// FUNÇÃO PARA NOTIFICAR BARBEIROS SOBRE AGENDAMENTOS PENDENTES
 async function verificarAgendamentosPendentes() {
     try {
         const agendamentos = await db.collection('agendamentos').where('status', '==', 'pendente').get();
@@ -234,7 +281,7 @@ async function verificarAgendamentosPendentes() {
     } catch (error) { console.error('Erro ao notificar agendamentos pendentes:', error); }
 }
 
-// --- AGENDADORES DE TAREFAS (SCHEDULERS) ---
+// AGENDADORES DE TAREFAS (SCHEDULERS)
 setInterval(verificarPendencias, 60000); // A cada 1 minuto
 setInterval(verificarAgendamentosPendentes, 60000); // A cada 1 minuto
 setInterval(verificarLembretesDeAgendamento, 15 * 60 * 1000); // A cada 15 minutos
@@ -242,11 +289,11 @@ setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000); // A cada 24 horas
 setInterval(calcularRankingClientes, 60 * 60 * 1000); // A cada hora
 setInterval(calcularRankingBarbeiros, 60 * 60 * 1000); // A cada hora
 
-// --- INICIAÇÃO DO SERVIDOR ---
+// INICIAÇÃO DO SERVIDOR
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
-    // Executa as funções de ranking na inicialização
+    // Executa as funções de ranking na inicialização para garantir que existam
     calcularRankingClientes();
     calcularRankingBarbeiros();
 });
