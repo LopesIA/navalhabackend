@@ -89,10 +89,6 @@ app.post('/enviar-notificacao', async (req, res) => {
 });
 
 
-// =================================================================
-// ============== INÍCIO DAS NOVAS IMPLEMENTAÇÕES ==================
-// =================================================================
-
 // --- ROTA PARA ENVIAR NOTIFICAÇÃO DE MARKETING EM MASSA (ADMIN) ---
 app.post('/enviar-notificacao-massa', async (req, res) => {
     const { title, body, adminUid } = req.body;
@@ -239,7 +235,7 @@ async function postarMensagemDiariaBlog() {
 }
 
 
-// --- FUNÇÃO PARA CALCULAR RANKING SEMANAL (OPÇÃO 5) ---
+// --- FUNÇÃO PARA CALCULAR RANKING SEMANAL (CLIENTES) ---
 async function calcularRankingSemanal() {
     try {
         const usuariosSnapshot = await db.collection('usuarios').orderBy('pontosFidelidade', 'desc').limit(10).get();
@@ -267,6 +263,53 @@ async function calcularRankingSemanal() {
     }
 }
 
+
+// =================================================================
+// ============== INÍCIO DAS NOVAS IMPLEMENTAÇÕES ==================
+// =================================================================
+
+// --- FUNÇÃO PARA CALCULAR RANKING DOS BARBEIROS (POR AVALIAÇÃO) ---
+async function calcularRankingBarbeiros() {
+    try {
+        const barbeirosSnapshot = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
+        const barbeiros = [];
+
+        barbeirosSnapshot.forEach(doc => {
+            const user = doc.data();
+            // Calcula a média, tratando divisão por zero
+            const media = (user.numAvaliacoes > 0) ? (user.somaAvaliacoes / user.numAvaliacoes) : 0;
+            if (user.numAvaliacoes > 0) { // Apenas inclui no ranking barbeiros com pelo menos uma avaliação
+                barbeiros.push({
+                    uid: doc.id,
+                    nome: user.nome,
+                    media: media,
+                    numAvaliacoes: user.numAvaliacoes
+                });
+            }
+        });
+
+        // Ordena pela maior média e, como desempate, pelo maior número de avaliações
+        barbeiros.sort((a, b) => {
+            if (a.media > b.media) return -1;
+            if (a.media < b.media) return 1;
+            if (a.numAvaliacoes > b.numAvaliacoes) return -1;
+            if (a.numAvaliacoes < b.numAvaliacoes) return 1;
+            return 0;
+        });
+
+        const top10 = barbeiros.slice(0, 10);
+
+        await db.collection('config').doc('rankingBarbeiros').set({
+            ranking: top10,
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        console.log('Ranking de barbeiros foi atualizado com sucesso.');
+
+    } catch (error) {
+        console.error('Erro ao calcular o ranking de barbeiros:', error);
+    }
+}
 
 // =================================================================
 // ============== FIM DAS NOVAS IMPLEMENTAÇÕES =====================
@@ -318,19 +361,17 @@ async function verificarPendencias() {
     }
 }
 
-// ALTERAÇÃO INICIADA: Nova função para notificar barbeiros sobre agendamentos pendentes
+// --- FUNÇÃO PARA NOTIFICAR BARBEIROS SOBRE AGENDAMENTOS PENDENTES ---
 async function verificarAgendamentosPendentes() {
     try {
         const agendamentosPendentesSnapshot = await db.collection('agendamentos').where('status', '==', 'pendente').get();
 
         if (agendamentosPendentesSnapshot.empty) {
-            // console.log('Nenhum agendamento pendente encontrado.');
             return;
         }
 
         const barbeirosParaNotificar = {};
 
-        // Agrupa os agendamentos por barbeiro
         agendamentosPendentesSnapshot.forEach(doc => {
             const agendamento = doc.data();
             const barbeiroUid = agendamento.barbeiroUid;
@@ -342,7 +383,6 @@ async function verificarAgendamentosPendentes() {
             }
         });
 
-        // Envia uma notificação para cada barbeiro com a contagem de agendamentos
         for (const barbeiroUid in barbeirosParaNotificar) {
             const count = barbeirosParaNotificar[barbeiroUid];
             const userDoc = await db.collection('usuarios').doc(barbeiroUid).get();
@@ -366,24 +406,18 @@ async function verificarAgendamentosPendentes() {
                 }
             }
         }
-
     } catch (error) {
         console.error('Erro ao verificar e notificar agendamentos pendentes:', error);
     }
 }
-// ALTERAÇÃO FINALIZADA
 
-
-// Agendadores que rodam a cada minuto
-setInterval(verificarPendencias, 60000);
-// ALTERAÇÃO INICIADA: Adicionado novo agendador para barbeiros
-setInterval(verificarAgendamentosPendentes, 60000);
-// ALTERAÇÃO FINALIZADA
-
-// NOVOS AGENDADORES
-setInterval(verificarLembretesDeAgendamento, 15 * 60 * 1000); // Roda a cada 15 minutos
-setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000); // Roda a cada 24 horas
-setInterval(calcularRankingSemanal, 7 * 24 * 60 * 60 * 1000); // Roda a cada 7 dias
+// --- AGENDADORES DE TAREFAS (SCHEDULERS) ---
+setInterval(verificarPendencias, 60000); // A cada 1 minuto
+setInterval(verificarAgendamentosPendentes, 60000); // A cada 1 minuto
+setInterval(verificarLembretesDeAgendamento, 15 * 60 * 1000); // A cada 15 minutos
+setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000); // A cada 24 horas
+setInterval(calcularRankingSemanal, 24 * 60 * 60 * 1000); // A cada 24 horas (para manter atualizado)
+setInterval(calcularRankingBarbeiros, 24 * 60 * 60 * 1000); // A cada 24 horas
 
 
 // --- INICIAÇÃO DO SERVIDOR ---
@@ -393,4 +427,5 @@ app.listen(PORT, () => {
     // Roda as funções uma vez na inicialização para garantir que os dados estejam frescos
     postarMensagemDiariaBlog();
     calcularRankingSemanal();
+    calcularRankingBarbeiros();
 });
