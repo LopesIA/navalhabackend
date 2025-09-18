@@ -51,14 +51,12 @@ app.post('/enviar-notificacao', async (req, res) => {
     const response = await admin.messaging().sendEachForMulticast(message);
     console.log('Resposta do FCM recebida:', response);
 
-    // ALTERAÇÃO INICIADA: Lógica de limpeza de tokens inválidos
     if (response.failureCount > 0) {
       const tokensToRemove = [];
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
           const error = resp.error;
           console.error(`Falha no envio para o token: ${fcmTokens[idx]}`, error);
-          // Verifica se o erro indica que o token é inválido/desregistrado
           if (error.code === 'messaging/registration-token-not-registered' ||
               error.code === 'messaging/invalid-registration-token') {
             tokensToRemove.push(fcmTokens[idx]);
@@ -74,7 +72,6 @@ app.post('/enviar-notificacao', async (req, res) => {
         console.log('Tokens inválidos removidos com sucesso.');
       }
     }
-    // ALTERAÇÃO FINALIZADA
 
     res.status(200).send({
       success: true,
@@ -92,16 +89,11 @@ app.post('/enviar-notificacao', async (req, res) => {
 });
 
 
-// --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (SEGUNDO PLANO) ---
+// --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (ADMIN) ---
 async function verificarPendencias() {
     try {
-        const depositosPendentes = await db.collection('depositos')
-            .where('status', '==', 'pendente')
-            .get();
-
-        const saquesPendentes = await db.collection('saques')
-            .where('status', '==', 'pendente')
-            .get();
+        const depositosPendentes = await db.collection('depositos').where('status', '==', 'pendente').get();
+        const saquesPendentes = await db.collection('saques').where('status', '==', 'pendente').get();
 
         const numDepositos = depositosPendentes.size;
         const numSaques = saquesPendentes.size;
@@ -109,13 +101,8 @@ async function verificarPendencias() {
         if (numDepositos > 0 || numSaques > 0) {
             const title = "Alerta de Transações Pendentes!";
             let body = "";
-
-            if (numDepositos > 0) {
-                body += `Há ${numDepositos} depósito(s) pendente(s). `;
-            }
-            if (numSaques > 0) {
-                body += `Há ${numSaques} saque(s) pendente(s).`;
-            }
+            if (numDepositos > 0) body += `Há ${numDepositos} depósito(s) pendente(s). `;
+            if (numSaques > 0) body += `Há ${numSaques} saque(s) pendente(s).`;
 
             const adminUsersSnapshot = await db.collection('usuarios').where('tipo', '==', 'admin').get();
             if (adminUsersSnapshot.empty) {
@@ -132,26 +119,83 @@ async function verificarPendencias() {
             });
 
             if (adminTokens.length > 0) {
+                const uniqueTokens = [...new Set(adminTokens)]; // Garante que não há tokens duplicados
                 const message = {
                     notification: { title, body },
-                    tokens: adminTokens,
+                    tokens: uniqueTokens,
                     webpush: { notification: { icon: '/icone.png' } }
                 };
-
                 await admin.messaging().sendEachForMulticast(message);
-                console.log('Notificação de pendências enviada para todos os admins.');
-            } else {
-                console.log('Administradores encontrados, mas sem tokens de notificação válidos.');
+                console.log('Notificação de pendências de SAQUE/DEPÓSITO enviada para todos os admins.');
             }
-        } else {
-            console.log('Nenhuma transação pendente encontrada.');
         }
     } catch (error) {
-        console.error('Erro ao verificar e enviar notificações de pendências:', error);
+        console.error('Erro ao verificar pendências de SAQUE/DEPÓSITO:', error);
     }
 }
 
+// ALTERAÇÃO INICIADA: Nova função para notificar barbeiros sobre agendamentos pendentes
+async function verificarAgendamentosPendentes() {
+    try {
+        const agendamentosPendentesSnapshot = await db.collection('agendamentos').where('status', '==', 'pendente').get();
+
+        if (agendamentosPendentesSnapshot.empty) {
+            // console.log('Nenhum agendamento pendente encontrado.');
+            return;
+        }
+
+        const barbeirosParaNotificar = {};
+
+        // Agrupa os agendamentos por barbeiro
+        agendamentosPendentesSnapshot.forEach(doc => {
+            const agendamento = doc.data();
+            const barbeiroUid = agendamento.barbeiroUid;
+            if (barbeiroUid) {
+                if (!barbeirosParaNotificar[barbeiroUid]) {
+                    barbeirosParaNotificar[barbeiroUid] = 0;
+                }
+                barbeirosParaNotificar[barbeiroUid]++;
+            }
+        });
+
+        // Envia uma notificação para cada barbeiro com a contagem de agendamentos
+        for (const barbeiroUid in barbeirosParaNotificar) {
+            const count = barbeirosParaNotificar[barbeiroUid];
+            const userDoc = await db.collection('usuarios').doc(barbeiroUid).get();
+
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                const fcmTokens = userData.fcmTokens || [];
+                
+                if (fcmTokens.length > 0) {
+                    const title = "⏰ Agendamentos Pendentes!";
+                    const body = `Você tem ${count} agendamento(s) aguardando sua aprovação.`;
+                    
+                    const message = {
+                        notification: { title, body },
+                        tokens: fcmTokens,
+                        webpush: { notification: { icon: '/icone.png' } }
+                    };
+
+                    await admin.messaging().sendEachForMulticast(message);
+                    console.log(`Notificação de agendamento pendente enviada para o barbeiro ${barbeiroUid}.`);
+                }
+            }
+        }
+
+    } catch (error) {
+        console.error('Erro ao verificar e notificar agendamentos pendentes:', error);
+    }
+}
+// ALTERAÇÃO FINALIZADA
+
+
+// Agendadores que rodam a cada minuto
 setInterval(verificarPendencias, 60000);
+// ALTERAÇÃO INICIADA: Adicionado novo agendador para barbeiros
+setInterval(verificarAgendamentosPendentes, 60000);
+// ALTERAÇÃO FINALIZADA
+
 
 // --- INICIAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
