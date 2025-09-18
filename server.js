@@ -5,7 +5,6 @@ const admin = require('firebase-admin');
 const cors = require('cors');
 
 // IMPORTANTE: Use a variável de ambiente que você configurou no Render
-// No seu caso, você mencionou que ela se chama GOOGLE_APPLICATION_CREDENTIALS
 const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
 admin.initializeApp({
@@ -94,8 +93,7 @@ app.post('/enviar-notificacao', async (req, res) => {
 });
 
 // --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (SEGUNDO PLANO) ---
-const adminToken = "seu_token_de_admin_aqui"; // Lembre-se de pegar esse token do Firestore também em um cenário real.
-
+// ALTERAÇÃO INICIADA: Lógica aprimorada para notificar todos os admins
 async function verificarPendencias() {
     try {
         const depositosPendentes = await db.collection('depositos')
@@ -120,21 +118,40 @@ async function verificarPendencias() {
                 body += `Há ${numSaques} saque(s) pendente(s).`;
             }
 
-            const message = {
-                token: adminToken,
-                notification: {
-                    title: title,
-                    body: body
-                },
-                webpush: {
-                    notification: {
-                        icon: '/icone.png'
-                    }
-                }
-            };
+            // Busca todos os usuários administradores
+            const adminUsersSnapshot = await db.collection('usuarios').where('tipo', '==', 'admin').get();
+            if (adminUsersSnapshot.empty) {
+                console.log('Nenhum administrador encontrado para notificar.');
+                return;
+            }
 
-            await admin.messaging().send(message);
-            console.log('Notificação de pendências enviada para o admin.');
+            const adminTokens = [];
+            adminUsersSnapshot.forEach(doc => {
+                const userData = doc.data();
+                if (userData.fcmTokens && userData.fcmTokens.length > 0) {
+                    adminTokens.push(...userData.fcmTokens);
+                }
+            });
+
+            if (adminTokens.length > 0) {
+                const message = {
+                    notification: {
+                        title: title,
+                        body: body
+                    },
+                    tokens: adminTokens,
+                    webpush: {
+                        notification: {
+                            icon: '/icone.png'
+                        }
+                    }
+                };
+
+                await admin.messaging().sendEachForMulticast(message);
+                console.log('Notificação de pendências enviada para todos os admins.');
+            } else {
+                console.log('Administradores encontrados, mas sem tokens de notificação válidos.');
+            }
         } else {
             console.log('Nenhuma transação pendente encontrada.');
         }
@@ -142,6 +159,7 @@ async function verificarPendencias() {
         console.error('Erro ao verificar e enviar notificações de pendências:', error);
     }
 }
+// ALTERAÇÃO FINALIZADA
 
 // Agende a função para rodar a cada 60 segundos (60000 milissegundos)
 setInterval(verificarPendencias, 60000);
