@@ -18,7 +18,7 @@ app.use(express.json());
 
 // Rota principal para enviar notificações
 app.post('/enviar-notificacao', async (req, res) => {
-  const { token, title, body, icon } = req.body;
+  const { token, title, body } = req.body;
   if (!token || !title || !body) {
     return res.status(400).send({
       success: false,
@@ -30,8 +30,12 @@ app.post('/enviar-notificacao', async (req, res) => {
     token: token,
     notification: {
       title: title,
-      body: body,
-      icon: icon || '/icone.png' // Use o ícone padrão se não for fornecido
+      body: body
+    },
+    webpush: {
+        notification: {
+            icon: '/icone.png'
+        }
     }
   };
 
@@ -56,7 +60,6 @@ app.post('/enviar-notificacao', async (req, res) => {
 // Função para checar e enviar notificações de pendências para o admin
 async function verificarPendencias() {
     try {
-        // Obtenha o token do admin do Firestore
         const adminDoc = await db.collection('tokens_admin').doc('tokenUnico').get();
         const adminToken = adminDoc.data()?.token;
 
@@ -65,13 +68,11 @@ async function verificarPendencias() {
             return;
         }
 
-        // Checa por depósitos pendentes
         const depositosPendentes = await db.collection('transacoes')
             .where('tipo', '==', 'deposito')
             .where('status', '==', 'pendente')
             .get();
 
-        // Checa por saques pendentes
         const saquesPendentes = await db.collection('transacoes')
             .where('tipo', '==', 'saque')
             .where('status', '==', 'pendente')
@@ -95,8 +96,12 @@ async function verificarPendencias() {
                 token: adminToken,
                 notification: {
                     title: title,
-                    body: body,
-                    icon: '/icone.png'
+                    body: body
+                },
+                webpush: {
+                    notification: {
+                        icon: '/icone.png'
+                    }
                 }
             };
 
