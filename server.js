@@ -144,39 +144,53 @@ async function postarMensagemDiariaBlog() {
     } catch (error) { console.error('Erro ao postar no blog:', error); }
 }
 
-// =================================================================
-// ============== INÍCIO DAS NOVAS IMPLEMENTAÇÕES ==================
-// =================================================================
-
-// --- FUNÇÃO PARA CALCULAR RANKING DOS CLIENTES (POR AGENDAMENTOS) ---
+// ATUALIZADO: Lógica de Ranking por Cortes/Agendamentos Concluídos
 async function calcularRankingClientes() {
     try {
-        const usuariosSnapshot = await db.collection('usuarios').where('tipo', '==', 'cliente').orderBy('cortesRealizados', 'desc').limit(10).get();
+        const usuariosSnapshot = await db.collection('usuarios')
+            .where('tipo', '==', 'cliente')
+            .orderBy('cortesRealizados', 'desc')
+            .limit(10)
+            .get();
+        
         const ranking = usuariosSnapshot.docs.map(doc => {
             const user = doc.data();
             return { uid: doc.id, nome: user.nome, contagem: user.cortesRealizados || 0 };
         });
-        await db.collection('config').doc('rankingClientes').set({ ranking, atualizadoEm: admin.firestore.FieldValue.serverTimestamp() });
+
+        await db.collection('config').doc('rankingClientes').set({ 
+            ranking, 
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp() 
+        });
         console.log('Ranking de clientes (por agendamentos) atualizado.');
-    } catch (error) { console.error('Erro ao calcular ranking de clientes:', error); }
+    } catch (error) { 
+        console.error('Erro ao calcular ranking de clientes:', error); 
+    }
 }
 
-// --- FUNÇÃO PARA CALCULAR RANKING DOS BARBEIROS (POR CORTES) ---
 async function calcularRankingBarbeiros() {
     try {
-        const barbeirosSnapshot = await db.collection('usuarios').where('tipo', '==', 'barbeiro').orderBy('clientesAtendidos', 'desc').limit(10).get();
+        const barbeirosSnapshot = await db.collection('usuarios')
+            .where('tipo', '==', 'barbeiro')
+            .orderBy('clientesAtendidos', 'desc')
+            .limit(10)
+            .get();
+
         const ranking = barbeirosSnapshot.docs.map(doc => {
             const user = doc.data();
             return { uid: doc.id, nome: user.nome, contagem: user.clientesAtendidos || 0 };
         });
-        await db.collection('config').doc('rankingBarbeiros').set({ ranking, atualizadoEm: admin.firestore.FieldValue.serverTimestamp() });
+
+        await db.collection('config').doc('rankingBarbeiros').set({ 
+            ranking, 
+            atualizadoEm: admin.firestore.FieldValue.serverTimestamp() 
+        });
         console.log('Ranking de barbeiros (por cortes) atualizado.');
-    } catch (error) { console.error('Erro ao calcular ranking de barbeiros:', error); }
+    } catch (error) { 
+        console.error('Erro ao calcular ranking de barbeiros:', error); 
+    }
 }
 
-// =================================================================
-// ============== FIM DAS NOVAS IMPLEMENTAÇÕES =====================
-// =================================================================
 
 // --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (ADMIN) ---
 async function verificarPendencias() {
@@ -232,7 +246,7 @@ setInterval(calcularRankingBarbeiros, 60 * 60 * 1000); // A cada hora
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
-    postarMensagemDiariaBlog();
+    // Executa as funções de ranking na inicialização
     calcularRankingClientes();
     calcularRankingBarbeiros();
 });
