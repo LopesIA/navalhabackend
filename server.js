@@ -18,7 +18,6 @@ app.use(cors());
 app.use(express.json());
 
 // --- ROTA PARA ENVIAR NOTIFICAÇÃO PARA UM USUÁRIO ESPECÍFICO ---
-// Agora você envia o UID do usuário e o backend encontra os tokens dele.
 app.post('/enviar-notificacao', async (req, res) => {
   const { uid, title, body } = req.body;
   if (!uid || !title || !body) {
@@ -29,71 +28,71 @@ app.post('/enviar-notificacao', async (req, res) => {
   }
 
   try {
-    // 1. Busca o documento do usuário no Firestore
-    const userDoc = await db.collection("usuarios").doc(uid).get();
+    const userRef = db.collection("usuarios").doc(uid);
+    const userDoc = await userRef.get();
+
     if (!userDoc.exists) {
-      return res.status(404).send({
-        success: false,
-        message: 'Usuário não encontrado.'
-      });
+      return res.status(404).send({ success: false, message: 'Usuário não encontrado.' });
     }
 
     const userData = userDoc.data();
     const fcmTokens = userData.fcmTokens || [];
 
     if (fcmTokens.length === 0) {
-      return res.status(404).send({
-        success: false,
-        message: 'Nenhum token encontrado para este usuário.'
-      });
+      return res.status(200).send({ success: true, message: 'Usuário não possui tokens para notificar.', successCount: 0, failureCount: 0 });
     }
 
-    // 2. Cria a mensagem de notificação
     const message = {
-      notification: {
-        title: title,
-        body: body,
-      },
-      tokens: fcmTokens, // Envia para todos os tokens do array
-      webpush: {
-        notification: {
-          icon: '/icone.png'
-        }
-      }
+      notification: { title, body },
+      tokens: fcmTokens,
+      webpush: { notification: { icon: '/icone.png' } }
     };
 
-    // 3. Envia a mensagem
     const response = await admin.messaging().sendEachForMulticast(message);
-    console.log('Mensagens enviadas com sucesso:', response);
+    console.log('Resposta do FCM recebida:', response);
 
-    // O sendEachForMulticast retorna um objeto com resultados.
-    // Vamos checar por falhas
-    const failedTokens = [];
-    response.responses.forEach((res, index) => {
-      if (!res.success) {
-        failedTokens.push(fcmTokens[index]);
-        console.error(`Falha no envio para o token: ${fcmTokens[index]}`, res.error);
+    // ALTERAÇÃO INICIADA: Lógica de limpeza de tokens inválidos
+    if (response.failureCount > 0) {
+      const tokensToRemove = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const error = resp.error;
+          console.error(`Falha no envio para o token: ${fcmTokens[idx]}`, error);
+          // Verifica se o erro indica que o token é inválido/desregistrado
+          if (error.code === 'messaging/registration-token-not-registered' ||
+              error.code === 'messaging/invalid-registration-token') {
+            tokensToRemove.push(fcmTokens[idx]);
+          }
+        }
+      });
+
+      if (tokensToRemove.length > 0) {
+        console.log('Removendo tokens inválidos do perfil do usuário:', tokensToRemove);
+        await userRef.update({
+          fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove)
+        });
+        console.log('Tokens inválidos removidos com sucesso.');
       }
-    });
+    }
+    // ALTERAÇÃO FINALIZADA
 
     res.status(200).send({
       success: true,
       message: 'Notificações enviadas!',
       successCount: response.successCount,
       failureCount: response.failureCount,
-      failedTokens: failedTokens
+      failedTokens: response.responses
+        .filter(r => !r.success)
+        .map((r, i) => ({ token: fcmTokens[i], error: r.error.code }))
     });
   } catch (error) {
-    console.error('Erro ao enviar notificação:', error);
-    res.status(500).send({
-      success: false,
-      message: 'Erro interno ao enviar notificação.'
-    });
+    console.error('Erro grave ao enviar notificação:', error);
+    res.status(500).send({ success: false, message: 'Erro interno ao enviar notificação.' });
   }
 });
 
+
 // --- FUNÇÃO PARA VERIFICAR PENDÊNCIAS (SEGUNDO PLANO) ---
-// ALTERAÇÃO INICIADA: Lógica aprimorada para notificar todos os admins
 async function verificarPendencias() {
     try {
         const depositosPendentes = await db.collection('depositos')
@@ -118,7 +117,6 @@ async function verificarPendencias() {
                 body += `Há ${numSaques} saque(s) pendente(s).`;
             }
 
-            // Busca todos os usuários administradores
             const adminUsersSnapshot = await db.collection('usuarios').where('tipo', '==', 'admin').get();
             if (adminUsersSnapshot.empty) {
                 console.log('Nenhum administrador encontrado para notificar.');
@@ -135,16 +133,9 @@ async function verificarPendencias() {
 
             if (adminTokens.length > 0) {
                 const message = {
-                    notification: {
-                        title: title,
-                        body: body
-                    },
+                    notification: { title, body },
                     tokens: adminTokens,
-                    webpush: {
-                        notification: {
-                            icon: '/icone.png'
-                        }
-                    }
+                    webpush: { notification: { icon: '/icone.png' } }
                 };
 
                 await admin.messaging().sendEachForMulticast(message);
@@ -159,9 +150,7 @@ async function verificarPendencias() {
         console.error('Erro ao verificar e enviar notificações de pendências:', error);
     }
 }
-// ALTERAÇÃO FINALIZADA
 
-// Agende a função para rodar a cada 60 segundos (60000 milissegundos)
 setInterval(verificarPendencias, 60000);
 
 // --- INICIAÇÃO DO SERVIDOR ---
