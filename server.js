@@ -38,26 +38,19 @@ app.post('/criar-deposito', async (req, res) => {
 
     try {
         const pagseguroRequest = {
-            reference_id: `deposito-${clienteUid}-${Date.now()}`,
-            customer: {
-                // A PagBank API exige o nome e o email para criar o checkout
-                name: "Cliente Navalha de Ouro",
-                email: "cliente@navalha.com"
-            },
-            items: [
-                {
-                    name: "Depósito de Saldo",
-                    quantity: 1,
-                    unit_amount: Math.round(valor * 100) // Valor em centavos
-                }
-            ],
-            // URLs de redirecionamento após o pagamento
-            redirect_url: `https://navalha-de-ouro.com/deposito-sucesso`,
-            // URL para onde o PagBank envia as notificações de status
-            notification_urls: [
-                `https://navalhabackend.onrender.com/pagseguro-notificacao`
-            ]
-        };
+    reference_id: `deposito-${clienteUid}-${Date.now()}`,
+    customer: {
+        name: 'Cliente Navalha de Ouro',
+        email: 'cliente@navalha.com'
+    },
+    items: [{
+        name: "Créditos para Agendamento",
+        quantity: 1,
+        unit_amount: parseInt(valor * 100)
+    }],
+    redirect_url: process.env.REDIRECT_URL,
+    notification_urls: [process.env.NOTIFICATION_URL]
+};
 
         const response = await axios.post(
             'https://ws.pagseguro.uol.com.br/checkouts',
