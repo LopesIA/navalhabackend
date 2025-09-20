@@ -78,16 +78,10 @@ app.post('/criar-deposito', async (req, res) => {
 
         const statusTransacao = response.data.charges[0].status;
 
-        if (statusTransacao === 'PAID') {
-            const clienteRef = db.collection('usuarios').doc(clienteUid);
-            const clienteDoc = await clienteRef.get();
-            const saldoAtual = clienteDoc.data().saldoVirtual || 0;
-            const novoSaldo = saldoAtual + valor;
-            await clienteRef.update({ saldoVirtual: novoSaldo });
-            return res.status(200).send({ success: true, message: 'Depósito aprovado e saldo atualizado!' });
-        } else {
-            return res.status(200).send({ success: false, message: 'Depósito pendente ou recusado.', status: statusTransacao });
-        }
+        // **MUDANÇA CRÍTICA:** Removemos a atualização do saldo aqui.
+        // A lógica agora apenas retorna a resposta para o cliente.
+        // O saldo será atualizado de forma segura pelo webhook.
+        return res.status(200).send({ success: true, message: 'Depósito enviado para processamento.', status: statusTransacao });
     } catch (error) {
         console.error('Erro ao processar depósito:', error.response ? error.response.data : error.message);
         return res.status(500).send({ success: false, message: 'Erro interno ao processar depósito.' });
@@ -116,7 +110,7 @@ app.post('/solicitar-saque', async (req, res) => {
         const payloadSaque = {
             amount: valorSaque,
             // Detalhes da conta bancária
-            bank: { name: dadosContaBancaria.nomeBanco, number: dadosContaBancaria.numeroBanco },
+            bank: { name: dadosContaBancaria.nomeBanco, number: dadosContaContaBancaria.numeroBanco },
             agency: dadosContaBancaria.agencia,
             account: { number: dadosContaBancaria.numeroConta, digit: dadosContaBancaria.digito },
             // ... outros campos
@@ -131,9 +125,18 @@ app.post('/solicitar-saque', async (req, res) => {
         });
 
         if (response.status === 200) {
-            const novoSaldo = saldoAtual - valorSaque;
-            await barbeiroRef.update({ saldoVirtual: novoSaldo });
-            return res.status(200).send({ success: true, message: 'Saque solicitado com sucesso!' });
+            // **MUDANÇA CRÍTICA:** Removemos a subtração do saldo aqui.
+            // Em vez disso, criamos um registro de saque pendente.
+            const saqueRef = await db.collection('saques_pendentes').add({
+                barbeiroUid,
+                valorSaque,
+                status: 'pendente',
+                // Adicione outros dados relevantes do saque aqui
+                dataSolicitacao: admin.firestore.Timestamp.now()
+            });
+
+            // O webhook do PagSeguro irá atualizar o status e subtrair o saldo.
+            return res.status(200).send({ success: true, message: 'Saque solicitado. Aguardando processamento.', saqueId: saqueRef.id });
         }
     } catch (error) {
         console.error('Erro ao processar saque:', error.response ? error.response.data : error.message);
