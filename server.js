@@ -110,7 +110,7 @@ app.post('/solicitar-saque', async (req, res) => {
         const payloadSaque = {
             amount: valorSaque,
             // Detalhes da conta bancária
-            bank: { name: dadosContaBancaria.nomeBanco, number: dadosContaContaBancaria.numeroBanco },
+            bank: { name: dadosContaBancaria.nomeBanco, number: dadosContaBancaria.numeroBanco },
             agency: dadosContaBancaria.agencia,
             account: { number: dadosContaBancaria.numeroConta, digit: dadosContaBancaria.digito },
             // ... outros campos
@@ -173,8 +173,18 @@ app.post('/pagseguro-notificacao', async (req, res) => {
                 const novoSaldo = saldoAtual + parseFloat(valorDeposito);
                 await clienteRef.update({ saldoVirtual: novoSaldo });
                 console.log(`Depósito de R$${valorDeposito} confirmado para o cliente ${clienteUid}. Novo saldo: R$${novoSaldo}`);
+            } else if (transactionId.startsWith('saque_')) {
+                // **NOVA LÓGICA PARA SAQUES**
+                const barbeiroUid = transactionId.split('_')[1];
+                const valorSaque = transaction.grossAmount; // Ou o campo correto para valor do saque
+                const barbeiroRef = db.collection('usuarios').doc(barbeiroUid);
+                const barbeiroDoc = await barbeiroRef.get();
+                const saldoAtual = barbeiroDoc.data().saldoVirtual || 0;
+                const novoSaldo = saldoAtual - parseFloat(valorSaque);
+                await barbeiroRef.update({ saldoVirtual: novoSaldo });
+                console.log(`Saque de R$${valorSaque} confirmado para o barbeiro ${barbeiroUid}. Novo saldo: R$${novoSaldo}`);
+                // Opcional: Atualize o status do saque na sua coleção 'saques_pendentes'
             }
-            // Você precisará de lógica similar para o webhook de saques
         } 
         
         res.status(200).send('Notificação processada com sucesso.');
