@@ -82,6 +82,35 @@ app.post('/criar-deposito', async (req, res) => {
     }
 });
 
+// ROTA PARA SOLICITAR UM SAQUE (NOVA ROTA)
+app.post('/solicitar-saque', async (req, res) => {
+    const { clienteUid, valorSaque, dadosContaBancaria } = req.body;
+
+    if (!clienteUid || !valorSaque || !dadosContaBancaria) {
+        return res.status(400).send({ success: false, message: 'Dados de saque incompletos.' });
+    }
+
+    const saqueRef = db.collection('saques').doc();
+    const transacaoId = 'SAQUE_' + Date.now();
+
+    try {
+        await saqueRef.set({
+            transacaoId: transacaoId,
+            clienteUid: clienteUid,
+            valor: valorSaque,
+            dadosContaBancaria: dadosContaBancaria,
+            status: 'pendente',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Simulação de resposta de sucesso
+        res.status(200).send({ success: true, message: 'Solicitação de saque enviada com sucesso.', data: { transacaoId: transacaoId } });
+    } catch (error) {
+        console.error('Erro ao processar solicitação de saque:', error);
+        res.status(500).send({ success: false, message: 'Falha ao processar solicitação de saque.' });
+    }
+});
+
 app.post('/public-key', async (req, res) => {
     if (!pagseguroToken) {
         return res.status(500).send({ success: false, message: 'Token do PagSeguro não configurado.' });
