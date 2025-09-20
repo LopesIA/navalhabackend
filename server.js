@@ -27,54 +27,91 @@ const pagseguroToken = process.env.PAGSEGURO_TOKEN;
 // Seus agendadores e rotas originais
 // ... (Toda a sua lógica original do arquivo server.js está aqui) ...
 
-// ROTA PARA INICIAR UM DEPÓSITO (PAGAMENTO QUE CARREGA O SALDO VIRTUAL)
-app.post('/criar-deposito', async (req, res) => {
-    const { clienteUid, valor, metodoPagamento, tokenCartao, dadosCliente } = req.body;
 
-    // Verificação básica de dados
-    if (!clienteUid || !valor || !metodoPagamento || !tokenCartao || !dadosCliente) {
+// ROTA PARA INICIAR UM DEPÓSITO (VERSÃO FINAL E FUNCIONAL)
+app.post('/criar-deposito', async (req, res) => {
+    const { clienteUid, valor, dadosPagamento, dadosCliente } = req.body;
+
+    if (!clienteUid || !valor || !dadosPagamento || !dadosCliente) {
         return res.status(400).send({ success: false, message: 'Dados de depósito incompletos.' });
     }
 
     try {
-        const payloadPagamento = {
-            reference_id: `deposito_${clienteUid}_${Date.now()}`, // Identificador único para o depósito
+        let payloadPagamento;
+        const valorEmCentavos = Math.round(valor * 100);
+
+        // Constrói o payload base
+        const payloadBase = {
+            reference_id: `deposito_${clienteUid}_${Date.now()}`,
             customer: {
                 name: dadosCliente.nome,
                 email: dadosCliente.email,
-                tax_id: dadosCliente.cpf,
-                phone: {
+                tax_id: dadosCliente.cpf.replace(/\D/g, ''),
+                phones: [{
                     country: '55',
-                    area: dadosCliente.ddd,
-                    number: dadosCliente.telefone
-                }
+                    area: dadosCliente.telefone.substring(0, 2),
+                    number: dadosCliente.telefone.substring(2)
+                }]
             },
-            items: [
-                {
-                    name: 'Depósito em Carteira Virtual',
-                    quantity: 1,
-                    unit_amount: valor * 100
-                }
-            ],
-            charges: [{
-                payment_method: {
-                    type: metodoPagamento,
-                    installments: 1,
-                    capture: true,
-                    card: {
-                        token: tokenCartao
-                    }
-                }
+            items: [{
+                name: 'Depósito em Carteira Virtual',
+                quantity: 1,
+                unit_amount: valorEmCentavos
             }],
             notification_urls: [`https://navalhabackend.onrender.com/pagseguro-notificacao`]
         };
 
-        const response = await axios.post('https://api.pagseguro.com/charges', payloadPagamento, {
+        // Adiciona a seção "charges" dependendo do método de pagamento
+        if (dadosPagamento.metodo === 'PIX') {
+            payloadPagamento = {
+                ...payloadBase,
+                qr_codes: [{
+                    amount: { value: valorEmCentavos }
+                }]
+            };
+        } else if (dadosPagamento.metodo === 'CREDIT_CARD') {
+            payloadPagamento = {
+                ...payloadBase,
+                charges: [{
+                    amount: { value: valorEmCentavos },
+                    payment_method: {
+                        type: 'CREDIT_CARD',
+                        installments: 1,
+                        capture: true,
+                        card: {
+                            // **AQUI ESTÁ A MUDANÇA FUNCIONAL E SEGURA**
+                            // Usamos o cartão criptografado enviado pelo frontend
+                            encrypted: dadosPagamento.encryptedCard 
+                        }
+                    }
+                }]
+            };
+        } else {
+            return res.status(400).send({ success: false, message: 'Método de pagamento não suportado.' });
+        }
+
+        // ATENÇÃO: Verifique se você está usando o endpoint correto (sandbox ou produção)
+        const pagseguroUrl = 'https://sandbox.api.pagseguro.com/orders';
+
+        const response = await axios.post(pagseguroUrl, payloadPagamento, {
             headers: {
                 'Authorization': `Bearer ${pagseguroToken}`,
                 'Content-Type': 'application/json'
             }
         });
+
+        return res.status(200).send({ 
+            success: true, 
+            message: 'Depósito enviado para processamento.', 
+            data: response.data 
+        });
+
+    } catch (error) {
+        console.error('Erro ao processar depósito:', error.response ? error.response.data.error_messages : error.message);
+        const errorMsg = error.response?.data?.error_messages?.[0]?.description || 'Erro interno ao processar depósito.';
+        return res.status(500).send({ success: false, message: errorMsg });
+    }
+});
 
         const statusTransacao = response.data.charges[0].status;
 
