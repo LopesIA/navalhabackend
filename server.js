@@ -257,14 +257,6 @@ const verificarPendencias = async () => {
       } catch (error) { console.error('Erro ao notificar agendamentos pendentes:', error); }
   };
   
-  // AGENDADORES DE TAREFAS (SCHEDULERS)
-  setInterval(verificarPendencias, 60000); // A cada 1 minuto
-  setInterval(verificarAgendamentosPendentes, 60000); // A cada 1 minuto
-  setInterval(verificarLembretesDeAgendamento, 15 * 60 * 1000); // A cada 15 minutos
-  setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000); // A cada 24 horas
-  setInterval(calcularRankingClientes, 60 * 60 * 1000); // A cada hora
-  setInterval(calcularRankingBarbeiros, 60 * 60 * 1000); // A cada hora
-  
   
   const verificarLembretesDeAgendamento = async () => {
       try {
@@ -364,6 +356,13 @@ const verificarPendencias = async () => {
   // ... (Resto do seu código)
   
   const PORT = process.env.PORT || 3000;
+  // AGENDADORES DE TAREFAS (SCHEDULERS)
+  setInterval(verificarPendencias, 60000); // A cada 1 minuto
+  setInterval(verificarAgendamentosPendentes, 60000); // A cada 1 minuto
+  setInterval(verificarLembretesDeAgendamento, 15 * 60 * 1000); // A cada 15 minutos
+  setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000); // A cada 24 horas
+  setInterval(calcularRankingClientes, 60 * 60 * 1000); // A cada hora
+  setInterval(calcularRankingBarbeiros, 60 * 60 * 1000); // A cada hora
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
   });
