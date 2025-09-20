@@ -104,17 +104,6 @@ app.post('/public-key', async (req, res) => {
     }
 });
 
-        const statusTransacao = response.data.charges[0].status;
-
-        // **MUDANÇA CRÍTICA:** Removemos a atualização do saldo aqui.
-        // A lógica agora apenas retorna a resposta para o cliente.
-        // O saldo será atualizado de forma segura pelo webhook.
-        return res.status(200).send({ success: true, message: 'Depósito enviado para processamento.', status: statusTransacao });
-    } catch (error) {
-        console.error('Erro ao processar depósito:', error.response ? error.response.data : error.message);
-        return res.status(500).send({ success: false, message: 'Erro interno ao processar depósito.' });
-    }
-});
 
 // ROTA PARA SOLICITAR UM SAQUE (RETIRADA DE DINHEIRO)
 app.post('/solicitar-saque', async (req, res) => {
