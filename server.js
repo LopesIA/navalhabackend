@@ -30,75 +30,57 @@ const pagseguroToken = process.env.PAGSEGURO_TOKEN;
 
 // ROTA PARA INICIAR UM DEPÓSITO (VERSÃO FINAL E FUNCIONAL)
 app.post('/criar-deposito', async (req, res) => {
-    const { clienteUid, valor, dadosPagamento, dadosCliente } = req.body;
+    const { clienteUid, valor } = req.body;
 
-    if (!clienteUid || !valor || !dadosPagamento || !dadosCliente) {
-        return res.status(400).send({ success: false, message: 'Dados de depósito incompletos.' });
-    }
+    if (!clienteUid || !valor || isNaN(valor) || valor <= 0) {
+        return res.status(400).send({ success: false, message: 'Dados de depósito incompletos ou inválidos.' });
+    }
 
-    try {
-        let payloadPagamento;
-        const valorEmCentavos = Math.round(valor * 100);
+    try {
+        const pagseguroRequest = {
+            reference_id: `deposito-${clienteUid}-${Date.now()}`,
+            customer: {
+                // A PagBank API exige o nome e o email para criar o checkout
+                name: "Cliente Navalha de Ouro",
+                email: "cliente@navalha.com"
+            },
+            items: [
+                {
+                    name: "Depósito de Saldo",
+                    quantity: 1,
+                    unit_amount: Math.round(valor * 100) // Valor em centavos
+                }
+            ],
+            // URLs de redirecionamento após o pagamento
+            redirect_url: `https://navalha-de-ouro.com/deposito-sucesso`,
+            // URL para onde o PagBank envia as notificações de status
+            notification_urls: [
+                `https://navalhabackend.onrender.com/pagseguro-notificacao`
+            ]
+        };
 
-        // Constrói o payload base
-        const payloadBase = {
-            reference_id: `deposito_${clienteUid}_${Date.now()}`,
-            customer: {
-                name: dadosCliente.nome,
-                email: dadosCliente.email,
-                tax_id: dadosCliente.cpf.replace(/\D/g, ''),
-                phones: [{
-                    country: '55',
-                    area: dadosCliente.telefone.substring(0, 2),
-                    number: dadosCliente.telefone.substring(2)
-                }]
-            },
-            items: [{
-                name: 'Depósito em Carteira Virtual',
-                quantity: 1,
-                unit_amount: valorEmCentavos
-            }],
-            notification_urls: [`https://navalhabackend.onrender.com/pagseguro-notificacao`]
-        };
+        const response = await axios.post(
+            'https://ws.pagseguro.uol.com.br/checkouts',
+            pagseguroRequest,
+            {
+                headers: {
+                    'Authorization': `Bearer ${pagseguroToken}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
 
-        // Adiciona a seção "charges" dependendo do método de pagamento
-        if (dadosPagamento.metodo === 'PIX') {
-            payloadPagamento = {
-                ...payloadBase,
-                qr_codes: [{
-                    amount: { value: valorEmCentavos }
-                }]
-            };
-        } else if (dadosPagamento.metodo === 'CREDIT_CARD') {
-            payloadPagamento = {
-                ...payloadBase,
-                charges: [{
-                    amount: { value: valorEmCentavos },
-                    payment_method: {
-                        type: 'CREDIT_CARD',
-                        installments: 1,
-                        capture: true,
-                        card: {
-                            // **AQUI ESTÁ A MUDANÇA FUNCIONAL E SEGURA**
-                            // Usamos o cartão criptografado enviado pelo frontend
-                            encrypted: dadosPagamento.encryptedCard 
-                        }
-                    }
-                }]
-            };
-        } else {
-            return res.status(400).send({ success: false, message: 'Método de pagamento não suportado.' });
-        }
+        res.status(200).send({
+            success: true,
+            message: 'Checkout criado com sucesso.',
+            data: response.data
+        });
 
-        // ATENÇÃO: Verifique se você está usando o endpoint correto (sandbox ou produção)
-        const pagseguroUrl = 'https://sandbox.api.pagseguro.com/orders';
-
-        const response = await axios.post(pagseguroUrl, payloadPagamento, {
-            headers: {
-                'Authorization': `Bearer ${pagseguroToken}`,
-                'Content-Type': 'application/json'
-            }
-        });
+    } catch (error) {
+        console.error('Erro ao criar o checkout de pagamento:', error.response?.data || error.message);
+        res.status(500).send({ success: false, message: 'Erro interno ao processar depósito.' });
+    }
+});
 
 app.post('/public-key', async (req, res) => {
     if (!pagseguroToken) {
