@@ -113,7 +113,8 @@ app.post('/criar-deposito', async (req, res) => {
     if (isNaN(valorEmCentavos) || valorEmCentavos <= 0) {
         return res.status(400).json({ error: "Valor inválido." });
     }
-    const referenceId = `deposito-${userType}-${uid}-${valorEmCentavos}-${uuidv4()}`;
+    // CORREÇÃO: reference_id sem hífens
+    const referenceId = `deposito-${userType}-${uid}-${valorEmCentavos}-${uuidv4().replace(/-/g, '')}`;
     const notificationUrl = `${BASE_URL}/pagbank-webhook`;
     const payload = {
         reference_id: referenceId,
@@ -140,14 +141,15 @@ app.post('/criar-deposito', async (req, res) => {
 // --- NOVAS ROTAS PARA PAGAMENTO COM CARTÃO E PIX (API DE CHARGES) ---
 // ======================================================================
 
-// ROTA 1: Criar uma cobrança genérica para obter o ID
+// ROTA 1: Criar uma cobrança para obter o ID (usado pelo cartão de crédito)
 app.post('/criar-sessao-pagamento', async (req, res) => {
     const { valor, uid } = req.body;
     if (!valor || !uid) {
         return res.status(400).json({ error: "Valor e UID são obrigatórios." });
     }
     const valorEmCentavos = Math.round(parseFloat(valor) * 100);
-    const referenceId = `charge-card-${uid}-${valorEmCentavos}-${uuidv4()}`;
+    // CORREÇÃO: reference_id sem hífens
+    const referenceId = `charge-card-${uid}-${valorEmCentavos}-${uuidv4().replace(/-/g, '')}`;
 
     const payload = {
         reference_id: referenceId,
@@ -162,7 +164,6 @@ app.post('/criar-sessao-pagamento', async (req, res) => {
         const response = await pagbankAPI.post('/charges', payload);
         res.status(200).json({
             chargeId: response.data.id,
-            // O SDK do PagBank não precisa de um "session_id" separado neste fluxo
         });
     } catch (error) {
         console.error("Erro ao criar charge no PagBank:", error.response ? JSON.stringify(error.response.data, null, 2) : error.message);
@@ -215,21 +216,32 @@ app.post('/finalizar-pagamento-cartao', async (req, res) => {
 
 // ROTA 3: Criar uma cobrança PIX
 app.post('/criar-cobranca-pix', async (req, res) => {
-    const { valor, uid } = req.body;
-    if (!valor || !uid) {
-        return res.status(400).json({ error: "Valor e UID são obrigatórios." });
+    const { valor, uid, dadosCliente } = req.body;
+    if (!valor || !uid || !dadosCliente || !dadosCliente.cpf || !dadosCliente.nome || !dadosCliente.email) {
+        return res.status(400).json({ error: "Valor, UID e dados do cliente (nome, email, cpf) são obrigatórios." });
     }
     const valorEmCentavos = Math.round(parseFloat(valor) * 100);
-    const referenceId = `charge-pix-${uid}-${valorEmCentavos}-${uuidv4()}`;
+    // CORREÇÃO: reference_id sem hífens
+    const referenceId = `charge-pix-${uid}-${valorEmCentavos}-${uuidv4().replace(/-/g, '')}`;
 
     const payload = {
         reference_id: referenceId,
+        customer: {
+            name: dadosCliente.nome,
+            email: dadosCliente.email,
+            tax_id: dadosCliente.cpf
+        },
         amount: {
             value: valorEmCentavos,
             currency: "BRL"
         },
+        // CORREÇÃO: Objeto payment_method.pix com a estrutura correta
         payment_method: {
-            type: "PIX"
+            type: "PIX",
+            pix: {
+                // Expira o QR Code em 1 hora (3600 segundos)
+                expires_in: 3600, 
+            }
         },
         notification_urls: [`${BASE_URL}/pagbank-webhook`],
     };
@@ -249,7 +261,7 @@ app.post('/criar-cobranca-pix', async (req, res) => {
 
 
 // ======================================================================
-// --- [NOVO] ROTA PARA SOLICITAÇÃO DE SAQUE ---
+// --- ROTA PARA SOLICITAÇÃO DE SAQUE ---
 // ======================================================================
 app.post('/solicitar-saque', async (req, res) => {
     const { barbeiroUid, valorSaque, dadosPix } = req.body;
@@ -317,7 +329,6 @@ app.post('/pagbank-webhook', async (req, res) => {
             
             // Lógica unificada para qualquer tipo de cobrança paga
             if ((type === 'deposito' || type === 'charge') && parts.length >= 4) {
-                const userType = 'cliente'; // Assumindo que apenas clientes depositam
                 const uid = parts[2];
                 const valorDepositado = amount.value / 100;
 
