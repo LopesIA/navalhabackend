@@ -8,12 +8,11 @@ const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
 const axios = require('axios');
-const { firestore } = require('firebase-admin');
+const { v4: uuidv4 } = require('uuid'); // Para gerar IDs únicos
 
 // --- INICIALIZAÇÃO DO FIREBASE ADMIN ---
-// Garante que o app só inicie se as credenciais do Firebase estiverem presentes
 if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    console.error("ERRO CRÍTICO: A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não foi definida no Render.");
+    console.error("ERRO CRÍTICO: A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não foi definida.");
     process.exit(1);
 }
 
@@ -24,7 +23,7 @@ try {
     });
     console.log("Firebase Admin inicializado com sucesso.");
 } catch (e) {
-    console.error("Erro fatal ao inicializar o Firebase Admin. Verifique o conteúdo da variável GOOGLE_APPLICATION_CREDENTIALS.", e);
+    console.error("Erro fatal ao inicializar o Firebase Admin.", e);
     process.exit(1);
 }
 
@@ -36,123 +35,213 @@ app.use(cors());
 app.use(express.json());
 
 // --- CONSTANTES E VARIÁVEIS DE AMBIENTE ---
-const pagbankSellerId = process.env.PAGBANK_SELLER_ID;
-const pagbankAppKey = process.env.PAGBANK_APP_KEY;
-const baseUrl = process.env.BASE_URL;
+const PAGBANK_TOKEN = process.env.PAGBANK_APP_KEY; // SEU TOKEN GERADO NO PAGBANK
+const BASE_URL = process.env.BASE_URL; // URL do seu backend (ex: https://navalhabackend.onrender.com)
 
+// Configuração do Axios para a API do PagBank (Ambiente de Produção)
+// Para usar o sandbox, troque para: 'https://sandbox.api.pagseguro.com'
 const pagbankAPI = axios.create({
-    baseURL: 'https://sandbox.api.pagbank.com/charges/v1',
+    baseURL: 'https://api.pagseguro.com',
     headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${pagbankAppKey}`,
-        'x-seller-id': pagbankSellerId
+        'Authorization': `Bearer ${PAGBANK_TOKEN}`
     }
 });
 
 // ======================================================================
-// --- NOVA ROTA PARA CRIAR DEPÓSITOS ---
+// --- ROTA PARA ENVIAR NOTIFICAÇÕES (MODIFICADA) ---
 // ======================================================================
-app.post('/criar-deposito', async (req, res) => {
+// Função auxiliar para enviar notificações
+async function sendNotification(uid, title, body, data = {}) {
+    if (!uid) {
+        console.error("UID do usuário não fornecido para notificação.");
+        return { success: false, message: "UID não fornecido." };
+    }
     try {
-        const { valor, descricao, uid } = req.body; // Adicionado 'uid' para referência
-        
-        if (!valor || !descricao || !uid) {
-            return res.status(400).send("Valor, descrição e UID do cliente são obrigatórios.");
+        const userDoc = await db.collection('usuarios').doc(uid).get();
+        if (!userDoc.exists) {
+            return { success: false, message: `Usuário ${uid} não encontrado.` };
+        }
+        const tokens = userDoc.data().fcmTokens;
+        if (!tokens || tokens.length === 0) {
+            return { success: false, message: `Usuário ${uid} não possui tokens de notificação.` };
         }
 
-        const payload = {
-            reference_id: `deposito-${uid}`, // Usando o UID do cliente como referência
-            description: descricao,
-            amount: {
-                value: Math.round(valor * 100)
-            },
-            payment_method: {
-                type: 'PIX'
-            },
-            notification_urls: [`${baseUrl}/webhook/pagbank`]
+        const message = {
+            notification: { title, body },
+            data, // Adiciona o payload de dados para deep linking
+            tokens: tokens,
         };
-        
-        console.log("Enviando solicitação para o PagBank:", JSON.stringify(payload, null, 2));
 
-        const response = await pagbankAPI.post('/charges/v1', payload);
+        const response = await admin.messaging().sendEachForMulticast(message);
+        console.log('Notificação enviada com sucesso:', response);
+        return { success: true, response };
+    } catch (error) {
+        console.error('Erro ao enviar notificação para UID:', uid, error);
+        return { success: false, message: error.message };
+    }
+}
+
+app.post('/enviar-notificacao', async (req, res) => {
+    const { uid, title, body, data } = req.body;
+    const result = await sendNotification(uid, title, body, data);
+    if (result.success) {
+        res.status(200).json({ message: "Notificação enviada com sucesso.", details: result.response });
+    } else {
+        res.status(500).json({ message: "Falha ao enviar notificação.", error: result.message });
+    }
+});
+
+
+// ======================================================================
+// --- NOVA ROTA PARA CRIAR COBRANÇA DE DEPÓSITO (PAGBANK) ---
+// ======================================================================
+app.post('/criar-deposito', async (req, res) => {
+    const { valor, uid } = req.body;
+
+    if (!valor || !uid) {
+        return res.status(400).json({ error: "Valor e UID do usuário são obrigatórios." });
+    }
+    
+    // O valor deve ser em centavos e um número inteiro
+    const valorEmCentavos = Math.round(parseFloat(valor) * 100);
+    if (isNaN(valorEmCentavos) || valorEmCentavos <= 0) {
+        return res.status(400).json({ error: "Valor inválido." });
+    }
+
+    // Criamos um ID de referência único que contém as informações que precisaremos no webhook
+    const referenceId = `deposito-${uid}-${valorEmCentavos}-${uuidv4()}`;
+    const notificationUrl = `${BASE_URL}/pagbank-webhook`;
+
+    const payload = {
+        reference_id: referenceId,
+        customer: {
+            name: "Cliente Navalha de Ouro", // Pode ser genérico
+            email: "cliente@email.com", // Pode ser genérico
+            tax_id: "12345678909" // Pode ser genérico
+        },
+        items: [{
+            name: "Crédito Navalha de Ouro",
+            quantity: 1,
+            unit_amount: valorEmCentavos
+        }],
+        qr_codes: [{
+            amount: {
+                value: valorEmCentavos
+            }
+        }],
+        notification_urls: [notificationUrl]
+    };
+
+    try {
+        console.log("Enviando para PagBank:", JSON.stringify(payload, null, 2));
+        const response = await pagbankAPI.post('/orders', payload);
+        console.log("Resposta do PagBank:", response.data);
         
-        console.log("Resposta do PagBank (SUCESSO):", JSON.stringify(response.data, null, 2));
-        
-        res.json({
-            status: 'ok',
-            qrcode: response.data.charges[0].payment_method.pix.qr_codes[0].links[0].href,
-            text_qr_code: response.data.charges[0].payment_method.pix.qr_codes[0].text
+        const qrCodeData = response.data.qr_codes[0];
+
+        res.status(200).json({
+            qrCodeUrl: qrCodeData.links.find(link => link.rel === 'QRCODE.PNG').href,
+            pixCopyPaste: qrCodeData.text
         });
 
     } catch (error) {
-        // Loga a resposta completa do erro do PagBank para depuração
-        console.error('Erro ao criar depósito com o PagBank:');
+        console.error('Erro ao criar cobrança no PagBank:');
         if (error.response) {
-            console.error('Dados do erro:', JSON.stringify(error.response.data, null, 2));
+            console.error('Data:', JSON.stringify(error.response.data, null, 2));
             console.error('Status:', error.response.status);
-            console.error('Headers:', error.response.headers);
-        } else if (error.request) {
-            console.error('Nenhuma resposta foi recebida. Requisição:', error.request);
-        } else {
-            console.error('Erro geral:', error.message);
+            return res.status(error.response.status).json(error.response.data);
         }
-
-        res.status(500).send("Erro interno ao processar o depósito. Verifique os logs do servidor.");
+        console.error('Erro Geral:', error.message);
+        res.status(500).json({ error: "Erro interno ao se comunicar com o PagBank." });
     }
 });
 
+
 // ======================================================================
-// --- ROTA EXISTENTE PARA WEBHOOK DO PAGBANK ---
+// --- ROTA DE WEBHOOK DO PAGBANK (MODIFICADA) ---
 // ======================================================================
-app.post('/webhook/pagbank', async (req, res) => {
+app.post('/pagbank-webhook', async (req, res) => {
+    console.log('--- Webhook PagBank Recebido ---');
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+
     try {
-        console.log('Webhook do PagBank recebido:', req.body);
-        const { id, reference_id, status } = req.body.charges[0];
-        
+        const { charges } = req.body;
+        if (!charges || !charges.length) {
+            console.log("Webhook sem 'charges'. Ignorando.");
+            return res.status(200).send("OK - No charges");
+        }
+
+        const charge = charges[0];
+        const { reference_id, status, amount } = charge;
+
         if (status === 'PAID') {
-            console.log(`Pagamento do pedido ${reference_id} aprovado. ID da transação: ${id}`);
-            // Seu código original para atualizar o Firestore (mantido)
-            if (reference_id) {
-                const uid = reference_id.split('-')[1]; 
-                if (uid) {
-                    await db.collection('clientes').doc(uid).update({
-                        ultimotoken: status, // Exemplo de atualização
-                    });
-                    console.log(`Status do cliente ${uid} atualizado para 'PAID' no Firestore.`);
-                } else {
-                    console.error("ID de referência inválido. Não foi possível extrair o UID do cliente.");
-                }
+            console.log(`Pagamento APROVADO para reference_id: ${reference_id}`);
+            
+            const parts = reference_id.split('-');
+            if (parts[0] !== 'deposito' || parts.length < 3) {
+                console.error(`reference_id inválido: ${reference_id}`);
+                return res.status(400).send("Invalid reference_id");
             }
-        } else if (status === 'CANCELED') {
-            console.log(`Pagamento do pedido ${reference_id} foi cancelado.`);
+
+            const uid = parts[1];
+            const valorEmCentavos = parseInt(parts[2], 10);
+            const valorDepositado = valorEmCentavos / 100;
+
+            const userRef = db.collection('usuarios').doc(uid);
+
+            await db.runTransaction(async (transaction) => {
+                const userDoc = await transaction.get(userRef);
+                if (!userDoc.exists) {
+                    throw new Error(`Usuário ${uid} não encontrado!`);
+                }
+                const userData = userDoc.data();
+
+                // Calcula pontos de fidelidade (dobro para VIP)
+                const pontosGanhos = userData.vip ? 8 : 4;
+
+                transaction.update(userRef, {
+                    saldo: admin.firestore.FieldValue.increment(valorDepositado),
+                    pontosFidelidade: admin.firestore.FieldValue.increment(pontosGanhos)
+                });
+                
+                // Registra a transação para o admin
+                const transacaoRef = db.collection('transacoes').doc();
+                transaction.set(transacaoRef, {
+                    tipo: 'deposito_pagbank',
+                    uid: uid,
+                    nome: userData.nome,
+                    valor: valorDepositado,
+                    status: 'concluido',
+                    chargeId: charge.id,
+                    ts: admin.firestore.FieldValue.serverTimestamp()
+                });
+            });
+
+            console.log(`Saldo de R$${valorDepositado.toFixed(2)} adicionado para o usuário ${uid}.`);
+
+            // Notifica o usuário sobre o depósito bem-sucedido
+            await sendNotification(
+                uid,
+                '💰 Depósito Aprovado!',
+                `Seu depósito de R$ ${valorDepositado.toFixed(2)} foi confirmado com sucesso.`,
+                { link: `/?action=open_wallet` } // Exemplo de deep link
+            );
+
+        } else {
+            console.log(`Status recebido: ${status} para reference_id: ${reference_id}. Ignorando.`);
         }
 
         res.status(200).send("OK");
+
     } catch (error) {
-        console.error('Erro no webhook do PagBank:', error.response ? error.response.data : error.message);
-        res.status(500).send("Erro interno.");
+        console.error('Erro no processamento do webhook do PagBank:', error);
+        res.status(500).send("Erro interno no servidor");
     }
 });
 
-// ======================================================================
-// --- AGENDADORES DE TAREFAS E INICIALIZAÇÃO DO SERVIDOR ---
-// ======================================================================
-const verificarPendencias = async () => { /* Sua lógica aqui */ };
-const verificarAgendamentosPendentes = async () => { /* Sua lógica aqui */ };
-const verificarLembretesDeAgendamento = async () => { /* Sua lógica aqui */ };
-const postarMensagemDiariaBlog = async () => { /* Sua lógica aqui */ };
-const calcularRankingClientes = async () => { /* Sua lógica aqui */ };
-const calcularRankingBarbeiros = async () => { /* Sua lógica aqui */ };
 
-setInterval(verificarPendencias, 60 * 60 * 1000);
-setInterval(verificarAgendamentosPendentes, 15 * 60 * 1000);
-setInterval(verificarLembretesDeAgendamento, 60 * 60 * 1000);
-setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000);
-setInterval(calcularRankingClientes, 6 * 60 * 60 * 1000);
-setInterval(calcularRankingBarbeiros, 6 * 60 * 60 * 1000);
-
-// ======================================================================
-// --- INICIALIZAÇÃO DO SERVIDOR ---
+// Suas outras rotas e agendadores de tarefas...
 // ======================================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
