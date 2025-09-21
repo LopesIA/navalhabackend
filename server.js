@@ -1,17 +1,18 @@
 // server.js
 
-// Carrega as variáveis de ambiente do arquivo .env (essencial para o Render)
+// Carrega as variáveis de ambiente do arquivo .env
 require('dotenv').config();
 
+// --- IMPORTS NECESSÁRIOS ---
 const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
 const axios = require('axios');
+const { firestore } = require('firebase-admin');
 
-// --- INICIALIZAÇÃO DO FIREBASE ---
-// Garante que o app só inicie se as credenciais do Firebase estiverem presentes
+// --- INICIALIZAÇÃO DO FIREBASE ADMIN ---
 if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    console.error("ERRO CRÍTICO: A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não foi definida no Render.");
+    console.error("ERRO CRÍTICO: A variável de ambiente GOOGLE_APPLICATION_CREDENTIALS não foi definida.");
     process.exit(1);
 }
 
@@ -34,254 +35,159 @@ app.use(cors());
 app.use(express.json());
 
 // --- CONSTANTES E VARIÁVEIS DE AMBIENTE ---
-// ALTERAÇÃO: Lendo a nova credencial do PagBank
+const pagbankSellerId = process.env.PAGBANK_SELLER_ID;
 const pagbankAppToken = process.env.PAGBANK_APP_TOKEN;
 
-
 // ======================================================================
-// --- ROTA DE DEPÓSITO (PAGBANK) - VERSÃO ATUALIZADA E COMPLETA ---
+// --- ROTA PARA CRIAR O DEPÓSITO VIA PIX (CHAMADA PELO FRONT-END) ---
 // ======================================================================
 
 app.post('/criar-deposito', async (req, res) => {
-    console.log("Recebida requisição para /criar-deposito com os dados:", req.body);
-    
-    const { clienteUid, valor, clienteNome, clienteEmail, clienteTelefone, clienteCpf } = req.body;
-
-    // Verificação da nova credencial
-    if (!pagbankAppToken) {
-        console.error("ERRO: A variável de ambiente PAGBANK_APP_TOKEN não foi configurada no Render.");
-        return res.status(500).send({ success: false, message: 'Erro de configuração do servidor de pagamento.' });
-    }
-    
-    // Validação rigorosa dos dados de entrada, incluindo CPF
-    if (!clienteUid || !valor || isNaN(valor) || valor <= 0 || !clienteNome || !clienteEmail || !clienteTelefone || !clienteCpf) {
-        return res.status(400).send({ success: false, message: 'Todos os dados do cliente (incluindo CPF) são obrigatórios.' });
-    }
-
     try {
-        const orderId = `deposito-${clienteUid}-${Date.now()}`;
-        
-        const pagseguroRequest = {
-            reference_id: orderId,
+        const { clienteUid, valor, clienteNome, clienteEmail, clienteTelefone, clienteCpf } = req.body;
+
+        if (!clienteUid || !valor || !clienteNome || !clienteEmail || !clienteCpf) {
+            return res.status(400).json({ success: false, message: "Dados do cliente ou valor ausentes." });
+        }
+
+        const payload = {
+            reference_id: `deposito_${clienteUid}_${Date.now()}`,
             customer: {
                 name: clienteNome,
                 email: clienteEmail,
-                tax_id: clienteCpf.replace(/\D/g, ''), // Garante que apenas números sejam enviados
-                phones: [{
-                    country: "55",
-                    area: clienteTelefone.substring(0, 2),
-                    number: clienteTelefone.substring(2),
-                    type: "MOBILE"
-                }]
+                tax_id: clienteCpf,
+                phones: [{ country: "55", area: clienteTelefone.substring(0, 2), number: clienteTelefone.substring(2) }]
             },
             items: [{
-                name: "Créditos Navalha de Ouro",
+                reference_id: "item-deposito-creditos",
+                name: "Depósito de Créditos Navalha de Ouro",
                 quantity: 1,
-                unit_amount: Math.round(valor * 100) // API exige o valor em centavos
+                unit_amount: valor // Já chega em centavos do front-end
+            }],
+            charges: [{
+                reference_id: `charge_${clienteUid}_${Date.now()}`,
+                description: `Depósito de R$ ${(valor / 100).toFixed(2)}`,
+                amount: {
+                    value: valor
+                },
+                payment_method: {
+                    type: "PIX",
+                    boleto: {
+                        holder: {
+                          name: clienteNome,
+                          tax_id: clienteCpf
+                        }
+                    }
+                }
             }],
             qr_codes: [{
-                amount: { value: Math.round(valor * 100) },
+                amount: { value: valor }
             }],
-            notification_urls: [`${process.env.BASE_URL || 'https://navalhabackend.onrender.com'}/pagseguro-notificacao`]
+            notification_urls: [`https://navalhabackend.onrender.com/webhook-pagbank`]
         };
 
-        console.log("Enviando para o PagBank a seguinte requisição:", JSON.stringify(pagseguroRequest, null, 2));
-
         const response = await axios.post(
-            'https://api.pagseguro.com/orders',
-            pagseguroRequest, {
+            'https://sandbox.api.pagbank.com.br/orders',
+            payload,
+            {
                 headers: {
-                    // ALTERAÇÃO: Usando o novo App Token como Bearer token
-                    'Authorization': `Bearer ${pagbankAppToken}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${pagbankAppToken}`
                 }
             }
         );
-        
-        await db.collection('pagamentos').doc(orderId).set({
-            pagseguroOrderId: response.data.id,
-            clienteUid: clienteUid,
-            valor: valor,
-            status: 'PENDING',
-            ts: admin.firestore.FieldValue.serverTimestamp()
-        });
 
-        const paymentLink = response.data.links.find(link => link.rel === 'PAY');
-        if (!paymentLink) {
-            throw new Error("Link de pagamento não encontrado na resposta do PagBank.");
-        }
+        const charge = response.data.charges[0];
+        const pix = charge.payment_method.pix;
 
-        res.status(200).send({
+        res.status(200).json({
             success: true,
-            message: 'Ordem de pagamento criada com sucesso.',
-            checkoutUrl: paymentLink.href
+            qrCodeUrl: pix.qr_codes[0].links[0].href,
+            pixCode: pix.qr_codes[0].text
         });
 
     } catch (error) {
-        console.error('ERRO CRÍTICO ao criar ordem de pagamento no PagBank:');
-        if (error.response) {
-            console.error('Data da Resposta do PagBank:', JSON.stringify(error.response.data, null, 2));
-            console.error('Status da Resposta:', error.response.status);
-        } else if (error.request) {
-            console.error('Nenhuma resposta recebida do PagBank. Detalhes da requisição:', error.request);
-        } else {
-            console.error('Erro ao configurar a requisição para o PagBank:', error.message);
-        }
-        res.status(500).send({ success: false, message: 'Erro interno ao processar depósito.' });
-    }
-});
-
-// ROTA DE WEBHOOK PARA RECEBER NOTIFICAÇÕES DO PAGBANK
-app.post('/pagseguro-notificacao', async (req, res) => {
-    const notification = req.body;
-    console.log('Webhook PagBank recebido:', JSON.stringify(notification));
-
-    try {
-        const orderId = notification?.reference_id;
-        const charge = notification?.charges?.[0];
-
-        if (!orderId || !charge) {
-            console.log('Notificação recebida sem reference_id ou charges. Ignorando.');
-            return res.status(200).send('Notificação ignorada.');
-        }
-
-        if (charge.status === 'PAID') {
-            const pagamentoRef = db.collection('pagamentos').doc(orderId);
-            const pagamentoDoc = await pagamentoRef.get();
-
-            if (!pagamentoDoc.exists) {
-                console.error(`Pagamento com reference_id ${orderId} não encontrado no Firestore.`);
-                return res.status(404).send('Referência não encontrada.');
-            }
-            
-            const dadosPagamento = pagamentoDoc.data();
-
-            if (dadosPagamento.status === 'PAID') {
-                console.log(`Pagamento ${orderId} já foi processado. Ignorando.`);
-                return res.status(200).send('Já processado.');
-            }
-            
-            const clienteUid = dadosPagamento.clienteUid;
-            const valor = dadosPagamento.valor;
-            const userRef = db.collection('usuarios').doc(clienteUid);
-            
-            await db.runTransaction(async (transaction) => {
-                const userDoc = await transaction.get(userRef);
-                if (!userDoc.exists) throw new Error(`Usuário ${clienteUid} não encontrado.`);
-                
-                const userData = userDoc.data();
-                const PONTOS_POR_DEPOSITO_NORMAL = 4;
-                const PONTOS_POR_DEPOSITO_VIP = 8;
-                const pontosGanhos = Math.floor(valor / 10) * (userData.vip ? PONTOS_POR_DEPOSITO_VIP : PONTOS_POR_DEPOSITO_NORMAL);
-
-                transaction.update(userRef, {
-                    saldo: admin.firestore.FieldValue.increment(valor),
-                    pontosFidelidade: admin.firestore.FieldValue.increment(pontosGanhos)
-                });
-                
-                transaction.update(pagamentoRef, { status: 'PAID', paidAt: admin.firestore.FieldValue.serverTimestamp() });
-            });
-            
-            console.log(`Saldo de R$${valor} creditado para o usuário ${clienteUid}.`);
-            await enviarNotificacao(clienteUid, '💰 Depósito Confirmado!', `Seu depósito de R$ ${valor.toFixed(2)} foi recebido com sucesso!`, { tipo: 'atualizar_saldo' });
-        }
-        res.status(200).send('Notificação recebida com sucesso.');
-    } catch (error) {
-        console.error('Erro ao processar webhook do PagBank:', error);
-        res.status(500).send('Erro interno no servidor.');
+        console.error('Erro na integração do PagBank:', error.response ? error.response.data : error.message);
+        res.status(500).json({
+            success: false,
+            message: "Erro ao criar o Pix. Tente novamente mais tarde.",
+            details: error.response ? error.response.data : error.message
+        });
     }
 });
 
 // ======================================================================
-// --- FUNÇÕES E ROTAS DE NOTIFICAÇÃO (INTACTAS) ---
+// --- ROTA DE NOTIFICAÇÃO DO PAGBANK (WEBHOOK) ---
 // ======================================================================
 
-async function enviarNotificacao(uid, title, body, data = {}) {
-    if (!uid || !title || !body) {
-        console.error('Dados da notificação incompletos:', { uid, title, body });
-        return;
-    }
+app.post('/webhook-pagbank', async (req, res) => {
     try {
-        const userRef = db.collection("usuarios").doc(uid);
-        const userDoc = await userRef.get();
-        if (!userDoc.exists) {
-            console.error(`Usuário ${uid} não encontrado para enviar notificação.`);
-            return;
-        }
-        const { fcmTokens } = userDoc.data();
-        if (!fcmTokens || fcmTokens.length === 0) {
-            console.log(`Usuário ${uid} não possui tokens de notificação.`);
-            return;
-        }
-        
-        const payload = { notification: { title, body }, data: data };
-        const response = await admin.messaging().sendToDevice(fcmTokens, payload);
-        
-        const tokensToRemove = [];
-        response.results.forEach((result, index) => {
-            const error = result.error;
-            if (error && ['messaging/invalid-registration-token', 'messaging/registration-token-not-registered'].includes(error.code)) {
-                tokensToRemove.push(fcmTokens[index]);
+        const body = req.body;
+        const eventType = body.event_type;
+        const resourceId = body.resource_id;
+
+        if (eventType === 'charge.paid') {
+            console.log(`Webhook: Pagamento do PagBank recebido para o ID: ${resourceId}`);
+            
+            const chargeResponse = await axios.get(
+                `https://sandbox.api.pagbank.com.br/charges/${resourceId}`,
+                {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${pagbankAppToken}`
+                    }
+                }
+            );
+
+            const orderId = chargeResponse.data.reference_id;
+            const status = chargeResponse.data.status;
+            const amount = chargeResponse.data.amount.value;
+
+            console.log(`Webhook: Transação com o status: ${status}`);
+
+            if (status === 'PAID') {
+                const parts = orderId.split('_');
+                if (parts.length === 3) {
+                    const clienteUid = parts[1];
+                    const valorEmReais = (amount / 100).toFixed(2);
+                    console.log(`Webhook: Depósito de R$ ${valorEmReais} confirmado para o cliente UID: ${clienteUid}`);
+
+                    // 1. Atualizar o saldo do usuário no Firestore
+                    const userRef = db.collection('perfil').doc(clienteUid);
+                    await db.runTransaction(async (transaction) => {
+                        const doc = await transaction.get(userRef);
+                        const novoSaldo = doc.data().saldo + (amount / 100);
+                        transaction.update(userRef, { saldo: novoSaldo });
+                    });
+
+                    // 2. Opcional: Registrar a transação para histórico
+                    await db.collection('transacoes').add({
+                        clienteUid,
+                        valor: amount / 100,
+                        tipo: 'deposito',
+                        metodo: 'pix',
+                        status: 'concluido',
+                        data: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    // 3. Enviar notificação push para o usuário (se você tiver essa funcionalidade)
+                    // (código opcional para notificação)
+
+                } else {
+                    console.error("Webhook: ID de referência inválido. Não foi possível extrair o UID do cliente.");
+                }
             }
-        });
-
-        if (tokensToRemove.length > 0) {
-            await userRef.update({ fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove) });
         }
+
+        res.status(200).send("OK");
     } catch (error) {
-        console.error('Erro geral ao enviar notificação:', error);
-    }
-}
-
-app.post('/enviar-notificacao', async (req, res) => {
-    const { uid, title, body, data } = req.body;
-    if (!uid || !title || !body) {
-        return res.status(400).send({ success: false, message: 'uid, title e body são obrigatórios' });
-    }
-    await enviarNotificacao(uid, title, body, data);
-    return res.status(200).send({ success: true, message: 'Tentativa de envio de notificação realizada.' });
-});
-
-app.post('/enviar-notificacao-massa', async (req, res) => {
-    const { title, body, adminUid } = req.body;
-    if (!title || !body || !adminUid) {
-        return res.status(400).json({ message: "Dados incompletos." });
-    }
-    try {
-        const adminDoc = await db.collection('usuarios').doc(adminUid).get();
-        if (!adminDoc.exists || adminDoc.data().tipo !== 'admin') {
-            return res.status(403).json({ message: "Apenas administradores podem fazer isso." });
-        }
-        const allUsersSnapshot = await db.collection('usuarios').get();
-        const tokens = [];
-        allUsersSnapshot.forEach(doc => {
-            const userTokens = doc.data().fcmTokens;
-            if (userTokens && Array.isArray(userTokens)) {
-                tokens.push(...userTokens);
-            }
-        });
-        if (tokens.length === 0) {
-            return res.status(200).json({ message: "Nenhum token encontrado." });
-        }
-        const messageChunks = [];
-        for (let i = 0; i < tokens.length; i += 500) {
-            messageChunks.push({ notification: { title, body }, tokens: tokens.slice(i, i + 500) });
-        }
-        let successCount = 0, failureCount = 0;
-        for (const message of messageChunks) {
-            const response = await admin.messaging().sendEachForMulticast(message);
-            successCount += response.successCount;
-            failureCount += response.failureCount;
-        }
-        res.status(200).json({ successCount, failureCount, message: "Notificações em massa enviadas." });
-    } catch (error) {
-        console.error("Erro ao enviar notificação em massa:", error);
-        res.status(500).json({ message: "Erro interno do servidor." });
+        console.error('Erro no webhook do PagBank:', error.response ? error.response.data : error.message);
+        res.status(500).send("Erro interno.");
     }
 });
 
 // ======================================================================
-// --- AGENDADORES DE TAREFAS (SEUS CÓDIGOS ORIGINAIS INTACTOS) ---
+// --- AGENDADORES DE TAREFAS E INICIALIZAÇÃO DO SERVIDOR ---
 // ======================================================================
 const verificarPendencias = async () => { /* Sua lógica aqui */ };
 const verificarAgendamentosPendentes = async () => { /* Sua lógica aqui */ };
@@ -290,18 +196,14 @@ const postarMensagemDiariaBlog = async () => { /* Sua lógica aqui */ };
 const calcularRankingClientes = async () => { /* Sua lógica aqui */ };
 const calcularRankingBarbeiros = async () => { /* Sua lógica aqui */ };
 
-setInterval(verificarPendencias, 3600000);
-setInterval(verificarAgendamentosPendentes, 900000);
-setInterval(verificarLembretesDeAgendamento, 3600000);
-setInterval(postarMensagemDiariaBlog, 86400000);
-setInterval(calcularRankingClientes, 21600000);
-setInterval(calcularRankingBarbeiros, 21600000);
+setInterval(verificarPendencias, 60 * 60 * 1000);
+setInterval(verificarAgendamentosPendentes, 15 * 60 * 1000);
+setInterval(verificarLembretesDeAgendamento, 60 * 60 * 1000);
+setInterval(postarMensagemDiariaBlog, 24 * 60 * 60 * 1000);
+setInterval(calcularRankingClientes, 6 * 60 * 60 * 1000);
+setInterval(calcularRankingBarbeiros, 6 * 60 * 60 * 1000);
 
-// ======================================================================
-// --- INICIALIZAÇÃO DO SERVIDOR ---
-// ======================================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
 });
-
