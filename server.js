@@ -101,27 +101,28 @@ app.post('/enviar-notificacao', async (req, res) => {
 // --- ROTA CORRIGIDA E MAIS INTELIGENTE PARA CRIAR COBRANÇA DE DEPÓSITO ---
 // ======================================================================
 app.post('/criar-deposito', async (req, res) => {
-    // Agora o backend espera uid, userType e valor
-    const { valor, uid, userType } = req.body; 
+    // O backend agora espera uid, userType e valor
+    const { valor, uid, userType, dadosCliente } = req.body;
 
-    if (!valor || !uid || !userType) {
-        return res.status(400).json({ error: "Valor, UID e tipo de usuário são obrigatórios." });
+    if (!valor || !uid || !userType || !dadosCliente || !dadosCliente.cpf) {
+        return res.status(400).json({ error: "Dados de valor, UID, tipo de usuário e cliente (com CPF) são obrigatórios." });
     }
-    
+
     const valorEmCentavos = Math.round(parseFloat(valor) * 100);
     if (isNaN(valorEmCentavos) || valorEmCentavos <= 0) {
         return res.status(400).json({ error: "Valor inválido." });
     }
 
+    // Criamos um ID de referência que inclui o userType
     const referenceId = `deposito-${userType}-${uid}-${valorEmCentavos}-${uuidv4()}`;
     const notificationUrl = `${BASE_URL}/pagbank-webhook`;
 
     const payload = {
         reference_id: referenceId,
         customer: {
-            name: "Usuário Navalha de Ouro",
-            email: "usuario@email.com",
-            tax_id: "12345678909"
+            name: dadosCliente.nome,
+            email: dadosCliente.email,
+            tax_id: dadosCliente.cpf
         },
         items: [{
             name: "Crédito Navalha de Ouro",
