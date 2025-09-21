@@ -54,17 +54,17 @@ const pagbankAPI = axios.create({
 // ======================================================================
 app.post('/criar-deposito', async (req, res) => {
     try {
-        const { valor, descricao } = req.body;
+        const { valor, descricao, uid } = req.body; // Adicionado 'uid' para referência
         
-        if (!valor || !descricao) {
-            return res.status(400).send("Valor e descrição do depósito são obrigatórios.");
+        if (!valor || !descricao || !uid) {
+            return res.status(400).send("Valor, descrição e UID do cliente são obrigatórios.");
         }
 
         const payload = {
-            reference_id: `deposito-${Date.now()}`,
+            reference_id: `deposito-${uid}`, // Usando o UID do cliente como referência
             description: descricao,
             amount: {
-                value: Math.round(valor * 100) // PagBank usa centavos
+                value: Math.round(valor * 100)
             },
             payment_method: {
                 type: 'PIX'
@@ -72,13 +72,12 @@ app.post('/criar-deposito', async (req, res) => {
             notification_urls: [`${baseUrl}/webhook/pagbank`]
         };
         
-        console.log("Enviando solicitação para o PagBank:", payload);
+        console.log("Enviando solicitação para o PagBank:", JSON.stringify(payload, null, 2));
 
-        const response = await pagbankAPI.post('/', payload);
+        const response = await pagbankAPI.post('/charges/v1', payload);
         
-        console.log("Resposta do PagBank:", response.data);
+        console.log("Resposta do PagBank (SUCESSO):", JSON.stringify(response.data, null, 2));
         
-        // Retorna os dados do Pix para o front-end
         res.json({
             status: 'ok',
             qrcode: response.data.charges[0].payment_method.pix.qr_codes[0].links[0].href,
@@ -86,8 +85,19 @@ app.post('/criar-deposito', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Erro ao criar depósito com o PagBank:', error.response ? error.response.data : error.message);
-        res.status(500).send("Erro interno ao processar o depósito.");
+        // Loga a resposta completa do erro do PagBank para depuração
+        console.error('Erro ao criar depósito com o PagBank:');
+        if (error.response) {
+            console.error('Dados do erro:', JSON.stringify(error.response.data, null, 2));
+            console.error('Status:', error.response.status);
+            console.error('Headers:', error.response.headers);
+        } else if (error.request) {
+            console.error('Nenhuma resposta foi recebida. Requisição:', error.request);
+        } else {
+            console.error('Erro geral:', error.message);
+        }
+
+        res.status(500).send("Erro interno ao processar o depósito. Verifique os logs do servidor.");
     }
 });
 
