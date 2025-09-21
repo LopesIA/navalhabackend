@@ -101,11 +101,10 @@ app.post('/enviar-notificacao', async (req, res) => {
 // --- NOVA ROTA PARA CRIAR COBRANÇA DE DEPÓSITO (PAGBANK) ---
 // ======================================================================
 app.post('/criar-deposito', async (req, res) => {
-    // Altera a desestruturação para receber o clienteUid do frontend
-    const { valor, clienteUid, userType } = req.body; 
+    // Agora o backend espera uid, userType e valor
+    const { valor, uid, userType } = req.body; 
 
-    // Validação que agora inclui o tipo de usuário
-    if (!valor || !clienteUid || !userType) {
+    if (!valor || !uid || !userType) {
         return res.status(400).json({ error: "Valor, UID e tipo de usuário são obrigatórios." });
     }
     
@@ -114,8 +113,7 @@ app.post('/criar-deposito', async (req, res) => {
         return res.status(400).json({ error: "Valor inválido." });
     }
 
-    // A referência agora inclui o tipo de usuário para o webhook
-    const referenceId = `deposito-${userType}-${clienteUid}-${valorEmCentavos}-${uuidv4()}`;
+    const referenceId = `deposito-${userType}-${uid}-${valorEmCentavos}-${uuidv4()}`;
     const notificationUrl = `${BASE_URL}/pagbank-webhook`;
 
     const payload = {
