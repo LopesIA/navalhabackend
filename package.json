@@ -1,7 +1,7 @@
 {
   "name": "notificacoes-backend",
-  "version": "3.0.8",
-  "description": "",
+  "version": "3.0.9",
+  "description": "Backend para o App Navalha de Ouro",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,10 +10,11 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^5.1.0",
-    "firebase-admin": "^13.5.0",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
     "cors": "^2.8.5",
-    "axios": "^1.7.2",
-    "dotenv": "^16.4.5"
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.5",
+    "uuid": "^9.0.1"
   }
 }
