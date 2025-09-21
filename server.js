@@ -137,20 +137,35 @@ app.post('/criar-deposito', async (req, res) => {
     };
 
     try {
-        const response = await pagbankAPI.post('/orders', payload);
-        const qrCodeData = response.data.qr_codes[0];
+    console.log("Enviando para PagBank:", JSON.stringify(payload, null, 2));
+    const response = await pagbankAPI.post('/orders', payload);
+    console.log("Resposta do PagBank:", JSON.stringify(response.data, null, 2));
+    
+    const qrCodeData = response.data.qr_codes[0];
 
-        res.status(200).json({
-            success: true,
-            qrCodeUrl: qrCodeData.links.find(link => link.rel === 'QRCODE.PNG').href,
-            pixCopyPaste: qrCodeData.text
-        });
+    res.status(200).json({
+        qrCodeUrl: qrCodeData.links.find(link => link.rel === 'QRCODE.PNG').href,
+        pixCopyPaste: qrCodeData.text
+    });
 
-    } catch (error) {
-        console.error('Erro ao criar cobrança no PagBank:', error.response?.data);
-        res.status(error.response?.status || 500).json({ error: error.response?.data?.message || "Erro interno ao se comunicar com o PagBank." });
+} catch (error) {
+    console.error('Erro ao criar cobrança no PagBank:');
+    if (error.response) {
+        // Erro com resposta HTTP do PagBank
+        console.error('Status:', error.response.status);
+        console.error('Data:', JSON.stringify(error.response.data, null, 2));
+        return res.status(error.response.status).json(error.response.data);
+    } else if (error.request) {
+        // Erro de rede ou sem resposta
+        console.error('Nenhuma resposta recebida do PagBank. A requisição foi feita, mas a conexão falhou.');
+        console.error('Erro de requisição:', error.message);
+        return res.status(500).json({ error: "Erro de rede ao se comunicar com o PagBank." });
+    } else {
+        // Outros erros
+        console.error('Erro ao configurar a requisição:', error.message);
+        return res.status(500).json({ error: "Erro interno no servidor." });
     }
-});
+}
 
 
 // ======================================================================
