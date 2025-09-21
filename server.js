@@ -249,6 +249,58 @@ app.post('/criar-cobranca-pix', async (req, res) => {
 
 
 // ======================================================================
+// --- [NOVO] ROTA PARA SOLICITAÇÃO DE SAQUE ---
+// ======================================================================
+app.post('/solicitar-saque', async (req, res) => {
+    const { barbeiroUid, valorSaque, dadosPix } = req.body;
+
+    if (!barbeiroUid || !valorSaque || !dadosPix || !dadosPix.tipoChave || !dadosPix.chave) {
+        return res.status(400).json({ message: "Todos os campos são obrigatórios." });
+    }
+
+    try {
+        const userRef = db.collection('usuarios').doc(barbeiroUid);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
+            return res.status(404).json({ message: "Usuário não encontrado." });
+        }
+
+        const userData = userDoc.data();
+        if (userData.saldo < valorSaque) {
+            return res.status(400).json({ message: "Saldo insuficiente para o saque." });
+        }
+
+        // Cria a solicitação no Firestore para aprovação manual do admin
+        await db.collection('solicitacoes').add({
+            tipo: 'saque',
+            usuarioUid: barbeiroUid,
+            usuarioNome: userData.nome,
+            valor: parseFloat(valorSaque),
+            chavePixTipo: dadosPix.tipoChave,
+            chavePix: dadosPix.chave,
+            nomeRecebedor: userData.nome, // Adiciona o nome do recebedor para facilitar
+            status: 'pendente',
+            ts: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Notifica o admin sobre a nova solicitação
+        const adminQuery = await db.collection("usuarios").where("tipo", "==", "admin").get();
+        if (!adminQuery.empty) {
+            adminQuery.forEach(adminDoc => {
+                sendNotification(adminDoc.id, "📥 Nova Solicitação de Saque", `O usuário ${userData.nome} solicitou um saque de R$ ${parseFloat(valorSaque).toFixed(2)}.`);
+            });
+        }
+
+        res.status(200).json({ message: "Solicitação de saque enviada com sucesso e aguardando aprovação." });
+
+    } catch (error) {
+        console.error("Erro ao processar solicitação de saque:", error);
+        res.status(500).json({ message: "Erro interno no servidor ao processar sua solicitação." });
+    }
+});
+
+// ======================================================================
 // --- ROTA DE WEBHOOK DO PAGBANK (ATUALIZADA) ---
 // ======================================================================
 app.post('/pagbank-webhook', async (req, res) => {
