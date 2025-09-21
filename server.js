@@ -31,7 +31,11 @@ const app = express();
 const db = admin.firestore();
 
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
-app.use(cors());
+const corsOptions = {
+    origin: 'https://navalha-de-ouro-v11.web.app',
+    optionsSuccessStatus: 200 // Para navegadores mais antigos
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // --- CONSTANTES E VARIÁVEIS DE AMBIENTE ---
