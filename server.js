@@ -42,6 +42,12 @@ app.use(express.json());
 const PAGBANK_TOKEN = process.env.PAGBANK_APP_KEY; // SEU TOKEN GERADO NO PAGBANK
 const BASE_URL = process.env.BASE_URL; // URL do seu backend (ex: https://navalhabackend.onrender.com)
 
+// Adiciona uma verificação para a chave do PagBank
+if (!PAGBANK_TOKEN) {
+    console.error("ERRO CRÍTICO: A variável de ambiente PAGBANK_APP_KEY não foi definida!");
+    process.exit(1);
+}
+
 // Configuração do Axios para a API do PagBank (Ambiente de Produção)
 // Para usar o sandbox, troque para: 'https://sandbox.api.pagseguro.com'
 const pagbankAPI = axios.create({
