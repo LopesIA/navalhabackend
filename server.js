@@ -440,10 +440,71 @@ app.post('/criar-cobranca-cartao', async (req, res) => {
 });
 
 app.post('/criar-e-pagar-com-cartao', async (req, res) => {
-    // Sua lógica de backend para criar a cobrança e pagar com o cartão
-    // O código aqui vai se conectar com a API do PagBank
-    // e usar os dados que você enviou do front-end
-    res.json({ message: "Rota de pagamento com cartão recebida!" });
+    const { valor, encryptedCard, dadosCliente, uid } = req.body;
+
+    // Converte o valor de BRL (ex: 10.00) para centavos (ex: 1000)
+    const valorCentavos = parseInt(valor * 100);
+
+    const idempotencyKey = uuidv4();
+
+    try {
+        // Envia os dados para a API do PagBank para criar e pagar a cobrança
+        const response = await axios.post(
+            'https://sandbox.api.pagseguro.com/charges',
+            {
+                reference_id: `charge-card-${uid}-${Date.now()}`,
+                description: "Depósito de Créditos",
+                amount: {
+                    value: valorCentavos,
+                    currency: "BRL"
+                },
+                payment_method: {
+                    type: "CREDIT_CARD",
+                    capture: true,
+                    card: {
+                        encrypted: encryptedCard,
+                        holder: {
+                            name: dadosCliente.nome
+                        }
+                    }
+                },
+                customer: {
+                    name: dadosCliente.nome,
+                    email: dadosCliente.email,
+                    tax_id: dadosCliente.cpf,
+                    phones: [
+                        {
+                            country: '55',
+                            area: dadosCliente.telefone.substring(0, 2),
+                            number: dadosCliente.telefone.substring(2)
+                        }
+                    ]
+                },
+                notification_urls: [`https://${req.get('host')}/pagbank-webhook`],
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${process.env.PAGBANK_TOKEN}`,
+                    'Content-Type': 'application/json',
+                    'x-idempotency-key': idempotencyKey
+                }
+            }
+        );
+
+        // Se a transação for bem-sucedida, atualiza o saldo do usuário no Firebase
+        if (response.data.status === 'PAID' || response.data.status === 'AUTHORIZED') {
+            const userDoc = db.collection('users').doc(uid);
+            await userDoc.update({
+                saldo: admin.firestore.FieldValue.increment(valorNumerico)
+            });
+        }
+        
+        res.status(200).json(response.data);
+
+    } catch (error) {
+        console.error("Erro ao processar pagamento com cartão:", error.response?.data || error.message);
+        res.status(500).json({ error: "Erro interno ao processar pagamento." });
+    }
 });
 
 
