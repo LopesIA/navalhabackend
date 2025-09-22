@@ -121,7 +121,7 @@ app.post('/criar-cobranca-pix', async (req, res) => {
                 expires_in: 3600, // Tempo de expiração de 1 hora
             }
         },
-        notification_urls: [`${BASE_URL}/pagbank-webhook`],
+        
         customer: {
             name: dadosCliente.nome,
             email: dadosCliente.email,
