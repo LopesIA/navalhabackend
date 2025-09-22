@@ -439,6 +439,14 @@ app.post('/criar-cobranca-cartao', async (req, res) => {
     }
 });
 
+app.post('/criar-e-pagar-com-cartao', async (req, res) => {
+    // Sua lógica de backend para criar a cobrança e pagar com o cartão
+    // O código aqui vai se conectar com a API do PagBank
+    // e usar os dados que você enviou do front-end
+    res.json({ message: "Rota de pagamento com cartão recebida!" });
+});
+
+
 // ======================================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
