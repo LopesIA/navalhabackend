@@ -103,17 +103,16 @@ app.post('/enviar-notificacao', async (req, res) => {
     }
 });
 
-// Rota para notificação em massa (CORRIGIDA)
+// MUDANÇA 6: ROTA PARA NOTIFICAÇÃO EM MASSA (CORRIGIDA E OTIMIZADA)
 app.post('/enviar-notificacao-massa', async (req, res) => {
     const { title, body, adminUid } = req.body;
 
-    // Validação de segurança simples
     try {
         const adminDoc = await db.collection('usuarios').doc(adminUid).get();
         if (!adminDoc.exists || adminDoc.data().tipo !== 'admin') {
             return res.status(403).json({ message: "Acesso negado." });
         }
-    } catch(e) {
+    } catch (e) {
         return res.status(500).json({ message: "Erro de autenticação do admin." });
     }
 
@@ -129,35 +128,67 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
         const allTokens = allUsersSnap.docs.reduce((acc, doc) => {
             const tokens = doc.data().fcmTokens;
-            if (tokens && tokens.length > 0) {
+            if (tokens && Array.isArray(tokens) && tokens.length > 0) {
                 acc.push(...tokens);
             }
             return acc;
         }, []);
-        
-        if (allTokens.length === 0) {
-            return res.status(200).json({ message: "Nenhum dispositivo registrado para receber notificações.", successCount: 0, failureCount: 0});
-        }
-        
-        // Remove duplicados para otimizar
+
         const uniqueTokens = [...new Set(allTokens)];
 
-        // O FCM envia em lotes de 500
+        if (uniqueTokens.length === 0) {
+            return res.status(200).json({ message: "Nenhum dispositivo registrado.", successCount: 0, failureCount: 0 });
+        }
+
         const message = {
             notification: { title, body },
-            data: { link: '/' } // Notificações em massa levam para a home
+            data: { link: '/' } 
         };
-        
-        const response = await admin.messaging().sendToDevice(uniqueTokens, message);
+
+        // Envia em lotes de 500 (limite do sendEachForMulticast)
+        const tokenChunks = [];
+        for (let i = 0; i < uniqueTokens.length; i += 500) {
+            tokenChunks.push(uniqueTokens.slice(i, i + 500));
+        }
+
+        let totalSuccessCount = 0;
+        let totalFailureCount = 0;
+
+        for (const chunk of tokenChunks) {
+            const response = await admin.messaging().sendEachForMulticast({ ...message, tokens: chunk });
+            totalSuccessCount += response.successCount;
+            totalFailureCount += response.failureCount;
+
+            // Limpeza de tokens inválidos (opcional, mas recomendado)
+            const tokensToRemove = [];
+            response.responses.forEach((result, index) => {
+                const error = result.error?.code;
+                if (error === 'messaging/invalid-registration-token' || error === 'messaging/registration-token-not-registered') {
+                    tokensToRemove.push(chunk[index]);
+                }
+            });
+
+            if (tokensToRemove.length > 0) {
+                console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
+                // Esta operação pode ser pesada. Para apps muito grandes, considere um processo batch offline.
+                const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', tokensToRemove).get();
+                const batch = db.batch();
+                usersToUpdate.forEach(userDoc => {
+                    const ref = userDoc.ref;
+                    batch.update(ref, { fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove) });
+                });
+                await batch.commit();
+            }
+        }
 
         res.status(200).json({
             message: "Operação de envio em massa concluída.",
-            successCount: response.successCount,
-            failureCount: response.failureCount
+            successCount: totalSuccessCount,
+            failureCount: totalFailureCount,
         });
+
     } catch (error) {
         console.error("Erro CRÍTICO no envio em massa:", error);
-        // Garante que a resposta sempre seja JSON
         res.status(500).json({
             message: "Erro interno no servidor ao enviar notificações em massa.",
             error: error.message
@@ -165,9 +196,9 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
     }
 });
 
-// Rota para o CRON JOB publicar o blog diário
+
+// MUDANÇA 3: ROTA DO CRON JOB COM MENSAGEM ATUALIZADA
 app.post('/trigger-daily-blog', async (req, res) => {
-    // Verificação de segurança simples com uma chave secreta
     const cronSecret = req.headers['x-cron-secret'];
     if (cronSecret !== process.env.CRON_SECRET) {
         return res.status(401).send('Acesso não autorizado.');
@@ -175,7 +206,7 @@ app.post('/trigger-daily-blog', async (req, res) => {
 
     try {
         const hoje = new Date();
-        hoje.setHours(0, 0, 0, 0); // Zera a hora para comparar apenas o dia
+        hoje.setHours(0, 0, 0, 0);
         const amanha = new Date(hoje);
         amanha.setDate(amanha.getDate() + 1);
 
@@ -194,11 +225,11 @@ app.post('/trigger-daily-blog', async (req, res) => {
         barbeirosSnap.forEach(doc => palavrasChave.push(doc.data().nome));
 
         const palavraSorteada = palavrasChave[Math.floor(Math.random() * palavrasChave.length)];
-        const codigo = `(${palavraSorteada.toLowerCase().replace(/\s/g, '-')})`; // ex: (corte-infantil)
+        const codigo = `(${palavraSorteada.toLowerCase().replace(/\s/g, '-')})`;
         
         await db.collection("blog").add({
             titulo: "🎁 Código de Resgate Diário!",
-            conteudo: `Encontrou! Resgate o código ${codigo} no seu painel para ganhar 5 pontos de fidelidade. Válido por 24 horas!`,
+            conteudo: `Encontrou! Resgate o código secreto de hoje para ganhar 5 pontos de fidelidade. Atenção: use o código exatamente como está, incluindo os parênteses: ${codigo}. Válido por 30 horas!`,
             autor: "Sistema Navalha de Ouro",
             autorUid: "sistema",
             ts: admin.firestore.FieldValue.serverTimestamp()
@@ -211,6 +242,7 @@ app.post('/trigger-daily-blog', async (req, res) => {
         res.status(500).send('Erro interno no servidor ao postar blog.');
     }
 });
+
 
 // Rota de saúde para o Render saber que o app está no ar
 app.get('/', (req, res) => {
