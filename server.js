@@ -189,7 +189,7 @@ app.post('/trigger-daily-blog', async (req, res) => {
             return res.status(200).send('O blog de hoje já foi postado.');
         }
 
-        const palavrasChave = ["fade", "moicano", "americano", "social", "tesoura", "degradê", "risquinho", "jaca", "corte infantil", "barba"];
+        const palavrasChave = ["fade", "moicano", "americano", "social", "tesoura", "degradê", "risquinho", "jaca", "corte infantil", "barba", "navalhado", "platinado", "luzes"];
         const barbeirosSnap = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
         barbeirosSnap.forEach(doc => palavrasChave.push(doc.data().nome));
 
