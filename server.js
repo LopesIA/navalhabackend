@@ -103,7 +103,7 @@ app.post('/enviar-notificacao', async (req, res) => {
     }
 });
 
-// MUDANÇA 6: ROTA PARA NOTIFICAÇÃO EM MASSA (CORRIGIDA E OTIMIZADA)
+// Rota para notificação em massa
 app.post('/enviar-notificacao-massa', async (req, res) => {
     const { title, body, adminUid } = req.body;
 
@@ -145,7 +145,6 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
             data: { link: '/' } 
         };
 
-        // Envia em lotes de 500 (limite do sendEachForMulticast)
         const tokenChunks = [];
         for (let i = 0; i < uniqueTokens.length; i += 500) {
             tokenChunks.push(uniqueTokens.slice(i, i + 500));
@@ -159,7 +158,6 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
             totalSuccessCount += response.successCount;
             totalFailureCount += response.failureCount;
 
-            // Limpeza de tokens inválidos (opcional, mas recomendado)
             const tokensToRemove = [];
             response.responses.forEach((result, index) => {
                 const error = result.error?.code;
@@ -170,7 +168,6 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
             if (tokensToRemove.length > 0) {
                 console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
-                // Esta operação pode ser pesada. Para apps muito grandes, considere um processo batch offline.
                 const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', tokensToRemove).get();
                 const batch = db.batch();
                 usersToUpdate.forEach(userDoc => {
@@ -196,9 +193,9 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
     }
 });
 
-
-// MUDANÇA 3: ROTA DO CRON JOB COM MENSAGEM ATUALIZADA
-app.post('/trigger-daily-blog', async (req, res) => {
+// --- ROTA DO CRON JOB ATUALIZADA ---
+// ALTERADO: A rota agora é '/postar-codigo-blog' para corresponder à sua configuração do Render.
+app.post('/postar-codigo-blog', async (req, res) => {
     const cronSecret = req.headers['x-cron-secret'];
     if (cronSecret !== process.env.CRON_SECRET) {
         return res.status(401).send('Acesso não autorizado.');
@@ -227,9 +224,10 @@ app.post('/trigger-daily-blog', async (req, res) => {
         const palavraSorteada = palavrasChave[Math.floor(Math.random() * palavrasChave.length)];
         const codigo = `(${palavraSorteada.toLowerCase().replace(/\s/g, '-')})`;
         
+        // MELHORADO: Mensagem atualizada para o formato que você solicitou.
         await db.collection("blog").add({
-            titulo: "🎁 Código de Resgate Diário!",
-            conteudo: `Encontrou! Resgate o código secreto de hoje para ganhar 5 pontos de fidelidade. Atenção: use o código exatamente como está, incluindo os parênteses: ${codigo}. Válido por 30 horas!`,
+            titulo: "🎁 Presente Diário Disponível!",
+            conteudo: `O código de resgate de hoje está aqui! Use-o no app para ganhar 5 pontos de fidelidade. Lembre-se: use o código exatamente como está, incluindo os parênteses, para o resgate funcionar com sucesso! Código: ${codigo}`,
             autor: "Sistema Navalha de Ouro",
             autorUid: "sistema",
             ts: admin.firestore.FieldValue.serverTimestamp()
