@@ -4,7 +4,7 @@
 require('dotenv').config();
 
 // --- IMPORTS NECESSÁRIOS ---
-const express = require('express');a
+const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
 
@@ -255,4 +255,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);
 });
-
