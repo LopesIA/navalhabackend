@@ -1,4 +1,4 @@
-// server.js (CORRIGIDO E PRONTO PARA PRODUÇÃO)
+// server.js (CORRIGIDO E PRONTO PARA PRODUÇÃO com chave de segurança no CRON)
 
 // Carrega as variáveis de ambiente do arquivo .env (essencial para o Render)
 require('dotenv').config();
@@ -27,7 +27,7 @@ const db = admin.firestore();
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
 // Permite que apenas seu app web se comunique com este backend.
 const corsOptions = {
-    origin: 'https://navalha-de-ouro-v11.web.app', 
+    origin: 'https://navalha-de-ouro-v11.web.app',
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
@@ -64,7 +64,7 @@ async function sendNotification(uid, title, body, data = {}) {
         };
 
         const response = await admin.messaging().sendEachForMulticast(message);
-        
+
         // Limpeza de tokens inválidos
         const tokensToRemove = [];
         response.responses.forEach((result, index) => {
@@ -81,7 +81,7 @@ async function sendNotification(uid, title, body, data = {}) {
                 fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove)
             });
         }
-        
+
         return { success: true, response };
     } catch (error) {
         console.error(`Erro ao enviar notificação para ${uid}:`, error);
@@ -142,7 +142,7 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
         const message = {
             notification: { title, body },
-            data: { link: '/' } 
+            data: { link: '/' }
         };
 
         const tokenChunks = [];
@@ -194,12 +194,16 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 });
 
 // --- ROTA DO CRON JOB ATUALIZADA ---
-// ALTERADO: A rota agora é '/postar-codigo-blog' para corresponder à sua configuração do Render.
 app.get('/cron/postar-codigo-blog', async (req, res) => {
-    const cronSecret = req.headers['x-cron-secret'];
-    if (cronSecret !== process.env.CRON_SECRET) {
+    // -----> INÍCIO DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
+    const { key } = req.query; // Pega a chave da URL (?key=SUA_SENHA)
+
+    // Compara a chave da URL com a variável de ambiente que você configurou
+    if (key !== process.env.CRON_SECRET_KEY) {
+        console.warn('Tentativa de acesso não autorizado ao CRON JOB do blog.');
         return res.status(401).send('Acesso não autorizado.');
     }
+    // -----> FIM DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
 
     try {
         const hoje = new Date();
@@ -223,8 +227,7 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
 
         const palavraSorteada = palavrasChave[Math.floor(Math.random() * palavrasChave.length)];
         const codigo = `(${palavraSorteada.toLowerCase().replace(/\s/g, '-')})`;
-        
-        // MELHORADO: Mensagem atualizada para o formato que você solicitou.
+
         await db.collection("blog").add({
             titulo: "🎁 Presente Diário Disponível!",
             conteudo: `O código de resgate de hoje está aqui! Use-o no app para ganhar 5 pontos de fidelidade. Lembre-se: use o código exatamente como está, incluindo os parênteses, para o resgate funcionar com sucesso! Código: ${codigo}`,
