@@ -200,7 +200,7 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
 
     // Compara a chave da URL com a variável de ambiente que você configurou
     if (key !== process.env.CRON_SECRET_KEY) {
-        console.warn('Tentativa de acesso não autorizado ao CRON JOB do blog.');
+        console.warn(`Tentativa de acesso não autorizado ao CRON JOB do blog. Chave recebida: ${key}`);
         return res.status(401).send('Acesso não autorizado.');
     }
     // -----> FIM DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
