@@ -195,7 +195,7 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
 // --- ROTA DO CRON JOB ATUALIZADA ---
 // ALTERADO: A rota agora é '/postar-codigo-blog' para corresponder à sua configuração do Render.
-app.post('/cron/postar-codigo-blog', async (req, res) => {
+app.get('/cron/postar-codigo-blog', async (req, res) => {
     const cronSecret = req.headers['x-cron-secret'];
     if (cronSecret !== process.env.CRON_SECRET) {
         return res.status(401).send('Acesso não autorizado.');
