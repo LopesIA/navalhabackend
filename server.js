@@ -196,12 +196,11 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 // --- ROTA DO CRON JOB ATUALIZADA ---
 app.get('/cron/postar-codigo-blog', async (req, res) => {
     // -----> INÍCIO DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
-    const { key } = req.query; // Pega a chave da URL (?key=SUA_SENHA)
+    const { key } = req.query;
 
-    // Compara a chave da URL com a variável de ambiente que você configurou
     if (key !== process.env.CRON_SECRET_KEY) {
         console.warn(`Tentativa de acesso não autorizado ao CRON JOB do blog. Chave recebida: ${key}`);
-        return res.status(401).send('Acesso não autorizado.');
+        return res.status(401).send('ERRO: Chave inválida.');
     }
     // -----> FIM DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
 
@@ -218,12 +217,22 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
             .get();
 
         if (!blogHojeSnap.empty) {
-            return res.status(200).send('O blog de hoje já foi postado.');
+            // Resposta curta para "saída não muito grande"
+            return res.status(200).send('OK: Blog já postado hoje.');
         }
 
         const palavrasChave = ["fade", "moicano", "americano", "social", "tesoura", "degradê", "risquinho", "jaca", "corte infantil", "barba", "navalhado", "platinado", "luzes"];
         const barbeirosSnap = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
-        barbeirosSnap.forEach(doc => palavrasChave.push(doc.data().nome));
+        barbeirosSnap.forEach(doc => {
+            if (doc.data().nome) {
+               palavrasChave.push(doc.data().nome);
+            }
+        });
+
+        if (palavrasChave.length === 0) {
+            console.error("CRON JOB: Nenhuma palavra-chave disponível para gerar o código do blog.");
+            return res.status(500).send("ERRO: Nenhuma palavra-chave encontrada.");
+        }
 
         const palavraSorteada = palavrasChave[Math.floor(Math.random() * palavrasChave.length)];
         const codigo = `(${palavraSorteada.toLowerCase().replace(/\s/g, '-')})`;
@@ -237,10 +246,12 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
         });
 
         console.log(`Blog diário postado com o código: ${codigo}`);
-        res.status(200).send(`Blog postado com sucesso com o código: ${codigo}`);
+        // Resposta curta para "saída não muito grande"
+        res.status(200).send('OK: Novo blog postado.');
     } catch (error) {
         console.error('Erro ao executar o CRON do blog:', error);
-        res.status(500).send('Erro interno no servidor ao postar blog.');
+        // Resposta curta para "saída não muito grande"
+        res.status(500).send('ERRO: Falha ao executar a tarefa do blog.');
     }
 });
 
