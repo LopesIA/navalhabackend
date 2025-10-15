@@ -213,7 +213,7 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
         const blogHojeSnap = await db.collection("blog")
             .where('ts', '>=', hoje)
             .where('ts', '<', amanha)
-            .where('autor', '==', 'Sistema Navalha de Ouro')
+            .where('autor', '==', 'Sistema VersãoPro')
             .get();
 
         if (!blogHojeSnap.empty) {
@@ -221,7 +221,10 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
             return res.status(200).send('OK: Blog já postado hoje.');
         }
 
-        const palavrasChave = ["fade", "moicano", "americano", "social", "tesoura", "degradê", "risquinho", "jaca", "corte infantil", "barba", "navalhado", "platinado", "luzes"];
+        const palavrasChave = [
+            "fade", "moicano", "americano", "social", "tesoura", "degradê", "risquinho", "jaca", "corte infantil", "barba", "navalhado", "platinado", "luzes",
+            "designer de cilios", "manicure e pedicure", "corte de cabelo", "gratidão", "paz", "amor", "beleza", "versãopro"
+        ];
         const barbeirosSnap = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
         barbeirosSnap.forEach(doc => {
             if (doc.data().nome) {
@@ -240,7 +243,7 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
         await db.collection("blog").add({
             titulo: "🎁 Presente Diário Disponível!",
             conteudo: `O código de resgate de hoje está aqui! Use-o no app para ganhar 5 pontos de fidelidade. Lembre-se: use o código exatamente como está, incluindo os parênteses, para o resgate funcionar com sucesso! Código: ${codigo}`,
-            autor: "Sistema Navalha de Ouro",
+            autor: "Sistema VersãoPro",
             autorUid: "sistema",
             ts: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -258,7 +261,7 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
 
 // Rota de saúde para o Render saber que o app está no ar
 app.get('/', (req, res) => {
-    res.send('Backend Navalha de Ouro está no ar!');
+    res.send('Backend VersãoPro está no ar!');
 });
 
 // --- INICIALIZAÇÃO DO SERVIDOR ---
