@@ -193,17 +193,17 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
     }
 });
 
-// --- ROTA DO CRON JOB ATUALIZADA ---
+// --- ROTAS DE CRON JOB ---
+
+// Rota para postar o código diário no blog
 app.get('/cron/postar-codigo-blog', async (req, res) => {
-    // -----> INÍCIO DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
     const { key } = req.query;
 
     if (key !== process.env.CRON_SECRET_KEY) {
         console.warn(`Tentativa de acesso não autorizado ao CRON JOB do blog. Chave recebida: ${key}`);
         return res.status(401).send('ERRO: Chave inválida.');
     }
-    // -----> FIM DA IMPLEMENTAÇÃO DE SEGURANÇA <-----
-
+    
     try {
         const hoje = new Date();
         hoje.setHours(0, 0, 0, 0);
@@ -217,7 +217,6 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
             .get();
 
         if (!blogHojeSnap.empty) {
-            // Resposta curta para "saída não muito grande"
             return res.status(200).send('OK: Blog já postado hoje.');
         }
 
@@ -249,12 +248,52 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
         });
 
         console.log(`Blog diário postado com o código: ${codigo}`);
-        // Resposta curta para "saída não muito grande"
         res.status(200).send('OK: Novo blog postado.');
     } catch (error) {
         console.error('Erro ao executar o CRON do blog:', error);
-        // Resposta curta para "saída não muito grande"
         res.status(500).send('ERRO: Falha ao executar a tarefa do blog.');
+    }
+});
+
+// ***NOVA ROTA DE CRON JOB PARA LIMPAR MENSAGENS***
+app.get('/cron/limpar-chats', async (req, res) => {
+    const { key } = req.query;
+
+    if (key !== process.env.CRON_SECRET_KEY) {
+        console.warn(`Tentativa de acesso não autorizado ao CRON JOB de limpeza de chat. Chave recebida: ${key}`);
+        return res.status(401).send('ERRO: Chave inválida.');
+    }
+
+    try {
+        const chatRef = db.collection('chats').doc('chatGlobal').collection('mensagens');
+        
+        // Calcula o timestamp de 24 horas atrás
+        const vinteQuatroHorasAtras = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        
+        // Cria a query para buscar mensagens mais antigas que 24h
+        const query = chatRef.where('ts', '<', vinteQuatroHorasAtras);
+
+        const snapshot = await query.get();
+        
+        if (snapshot.empty) {
+            console.log("Limpeza de Chat: Nenhuma mensagem antiga para deletar.");
+            return res.status(200).send('OK: Nenhuma mensagem para deletar.');
+        }
+
+        // Deleta as mensagens em lotes de 500 (limite do batch)
+        const batch = db.batch();
+        snapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+
+        console.log(`Limpeza de Chat: ${snapshot.size} mensagens antigas foram deletadas.`);
+        res.status(200).send(`OK: ${snapshot.size} mensagens deletadas.`);
+
+    } catch (error) {
+        console.error('Erro ao executar o CRON de limpeza de chat:', error);
+        res.status(500).send('ERRO: Falha ao executar a tarefa de limpeza.');
     }
 });
 
