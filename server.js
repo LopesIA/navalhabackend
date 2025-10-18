@@ -255,6 +255,59 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
     }
 });
 
+// ADICIONE ESTA NOVA ROTA AO FINAL DO ARQUIVO SERVER.JS, ANTES DA ROTA '/'
+// Rota de CRON para limpar fotos de clientes expiradas
+app.get('/cron/limpar-fotos-portfolio', async (req, res) => {
+    const { key } = req.query;
+
+    if (key !== process.env.CRON_SECRET_KEY) {
+        return res.status(401).send('ERRO: Chave inválida.');
+    }
+
+    try {
+        const agora = admin.firestore.Timestamp.now();
+        const profissionaisSnap = await db.collection('usuarios')
+            .where('portfolio', '!=', [])
+            .get();
+
+        if (profissionaisSnap.empty) {
+            return res.status(200).send("OK: Nenhum portfólio para verificar.");
+        }
+
+        const batch = db.batch();
+        let fotosRemovidas = 0;
+
+        profissionaisSnap.forEach(doc => {
+            const profissional = doc.data();
+            const portfolioAtual = profissional.portfolio || [];
+            
+            const portfolioFiltrado = portfolioAtual.filter(item => {
+                // Mantém itens que não são de clientes, ou que são permanentes, ou que ainda não expiraram
+                const manter = !item.enviadaPorCliente || item.permanente || item.expiraEm > agora;
+                if (!manter) {
+                    fotosRemovidas++;
+                }
+                return manter;
+            });
+
+            // Se o portfólio mudou, atualiza no batch
+            if (portfolioFiltrado.length < portfolioAtual.length) {
+                batch.update(doc.ref, { portfolio: portfolioFiltrado });
+            }
+        });
+        
+        await batch.commit();
+
+        console.log(`Limpeza de Portfólio: ${fotosRemovidas} foto(s) de cliente expirada(s) foram removidas.`);
+        res.status(200).send(`OK: ${fotosRemovidas} foto(s) removida(s).`);
+
+    } catch (error) {
+        console.error('Erro no CRON de limpeza de portfólio:', error);
+        res.status(500).send('ERRO: Falha ao executar tarefa.');
+    }
+});
+
+
 // ***NOVA ROTA DE CRON JOB PARA LIMPAR MENSAGENS***
 app.get('/cron/limpar-chats', async (req, res) => {
     const { key } = req.query;
