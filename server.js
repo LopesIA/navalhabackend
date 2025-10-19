@@ -27,7 +27,25 @@ const db = admin.firestore();
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
 // Permite que apenas seu app web se comunique com este backend.
 const corsOptions = {
-    origin: 'https://navalha-de-ouro-v11.web.app',
+    // Novo código para o CORS no server.js
+const allowedOrigins = [
+    'https://navalha-de-ouro-v11.web.app', // Antiga URL (opcional, se ainda usar)
+    'https://novaversao.site', // <--- COLOQUE A SUA URL AQUI
+    'http://localhost:3000' // Opcional, para desenvolvimento
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
+// ...
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
