@@ -210,6 +210,182 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
     }
 });
 
+// ADICIONE ESTE BLOCO DE CÓDIGO NO SERVER.JS
+
+// --- NOVAS ROTAS DE ADMIN PARA GERENCIAMENTO DE USUÁRIO ---
+
+// Middleware de verificação de admin para proteger as rotas
+const isAdmin = async (req, res, next) => {
+    const { adminUid } = req.body;
+    if (!adminUid) {
+        return res.status(400).json({ message: "ID do Admin é obrigatório." });
+    }
+    try {
+        const adminDoc = await db.collection('usuarios').doc(adminUid).get();
+        if (!adminDoc.exists || adminDoc.data().tipo !== 'admin') {
+            return res.status(403).json({ message: "Acesso negado. Permissão de Admin necessária." });
+        }
+        next(); // Se for admin, continua para a próxima função (a rota em si)
+    } catch (e) {
+        return res.status(500).json({ message: "Erro de autenticação do admin.", error: e.message });
+    }
+};
+
+// Rota para atualizar dados do usuário no Firestore
+app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
+    const { targetUid, updates } = req.body;
+    if (!targetUid || !updates) {
+        return res.status(400).json({ message: "ID do usuário e dados para atualização são obrigatórios." });
+    }
+    try {
+        await db.collection('usuarios').doc(targetUid).update(updates);
+        res.status(200).json({ message: "Dados do usuário atualizados no Firestore com sucesso." });
+    } catch (error) {
+        console.error("Erro ao atualizar dados do usuário no Firestore:", error);
+        res.status(500).json({ message: "Falha ao atualizar dados.", error: error.message });
+    }
+});
+
+// Rota para definir uma nova senha para o usuário
+app.post('/admin/reset-user-password', isAdmin, async (req, res) => {
+    const { targetUid, newPassword } = req.body;
+    if (!targetUid || !newPassword || newPassword.length < 6) {
+        return res.status(400).json({ message: "ID do usuário e uma nova senha de no mínimo 6 caracteres são obrigatórios." });
+    }
+    try {
+        await admin.auth().updateUser(targetUid, { password: newPassword });
+        res.status(200).json({ message: "Senha do usuário alterada com sucesso." });
+    } catch (error) {
+        console.error("Erro ao redefinir senha de usuário:", error);
+        res.status(500).json({ message: "Falha ao redefinir senha.", error: error.message });
+    }
+});
+
+// Rota para habilitar/desabilitar uma conta de usuário
+app.post('/admin/toggle-user-status', isAdmin, async (req, res) => {
+    const { targetUid, disable } = req.body; // 'disable' deve ser true ou false
+    if (!targetUid || typeof disable !== 'boolean') {
+        return res.status(400).json({ message: "ID do usuário e status (disable: true/false) são obrigatórios." });
+    }
+    try {
+        await admin.auth().updateUser(targetUid, { disabled: disable });
+        res.status(200).json({ message: `Usuário ${disable ? 'desabilitado' : 'habilitado'} com sucesso.` });
+    } catch (error) {
+        console.error("Erro ao alterar status do usuário:", error);
+        res.status(500).json({ message: "Falha ao alterar status do usuário.", error: error.message });
+    }
+});
+
+// ADICIONE ESTE BLOCO DE CÓDIGO INTEIRO NO SEU SERVER.JS
+
+const { google } = require('googleapis');
+
+// Inicializa o cliente da API do Google Play
+const androidpublisher = google.androidpublisher('v3');
+
+// Função auxiliar para ativar o benefício no Firestore
+async function activateBenefitInFirestore(uid, sku) {
+    const userRef = db.collection('usuarios').doc(uid);
+    const expiracao = new Date();
+    let updates = {};
+
+    switch (sku) {
+        case 'adesao_vip_6_meses':
+            expiracao.setDate(expiracao.getDate() + 180);
+            updates = {
+                vip: true,
+                vipExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
+            };
+            break;
+        case 'turbinar_perfil_24h':
+            expiracao.setHours(expiracao.getHours() + 24);
+            updates = {
+                boostExpiracao: admin.firestore.Timestamp.fromDate(expiracao),
+                ultimoBoostComprado: admin.firestore.FieldValue.serverTimestamp()
+            };
+            break;
+        case 'pro_tier1':
+        case 'pro_tier2':
+        case 'pro_tier3':
+            expiracao.setDate(expiracao.getDate() + 30);
+            const tier = sku.split('_')[1]; // extrai 'tier1', 'tier2', etc.
+            updates = {
+                proAtivo: true,
+                proTier: tier,
+                proExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
+            };
+            break;
+        default:
+            throw new Error(`SKU desconhecido: ${sku}`);
+    }
+
+    await userRef.update(updates);
+    console.log(`Benefício ${sku} ativado para o usuário ${uid}.`);
+}
+
+// Rota para validar a compra da Google Play
+app.post('/google-play/validate-purchase', async (req, res) => {
+    const { purchaseToken, sku, uid } = req.body;
+    if (!purchaseToken || !sku || !uid) {
+        return res.status(400).json({ success: false, message: 'purchaseToken, sku e uid são obrigatórios.' });
+    }
+
+    try {
+        // Autentica com a API do Google
+        const auth = new google.auth.GoogleAuth({
+            credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
+            scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+        });
+        google.options({ auth });
+        
+        const packageName = 'com.seupacote.app'; // <-- IMPORTANTE: SUBSTITUA PELO NOME DO SEU PACOTE
+
+        // Verifica se o token já foi validado antes para evitar reativação
+        const purchaseRecordRef = db.collection('google_play_purchases').doc(purchaseToken);
+        const purchaseRecord = await purchaseRecordRef.get();
+        if (purchaseRecord.exists) {
+            console.warn(`Tentativa de revalidar um purchaseToken já processado: ${purchaseToken}`);
+            return res.status(409).json({ success: false, message: 'Esta compra já foi processada.' });
+        }
+
+        // Consulta a API do Google Play para validar a compra
+        const result = await androidpublisher.purchases.products.get({
+            packageName: packageName,
+            productId: sku,
+            token: purchaseToken,
+        });
+
+        // 0 = Comprado, 1 = Cancelado, 2 = Pendente
+        if (result.data.purchaseState === 0) {
+            // A compra é válida!
+            // Ativa o benefício para o usuário no Firestore
+            await activateBenefitInFirestore(uid, sku);
+
+            // Salva um registro da compra para evitar reprocessamento
+            await purchaseRecordRef.set({
+                uid: uid,
+                sku: sku,
+                validationTimestamp: admin.firestore.FieldValue.serverTimestamp(),
+                orderId: result.data.orderId
+            });
+
+            // Responde com sucesso para o frontend
+            return res.status(200).json({ success: true, message: 'Compra validada e benefício ativado!' });
+        } else {
+            // A compra não está em estado "Comprado"
+            throw new Error(`Status da compra inválido: ${result.data.purchaseState}`);
+        }
+
+    } catch (error) {
+        console.error('Erro na validação da compra do Google Play:', error.message);
+        // O código 404 geralmente significa que a compra não foi encontrada (token inválido)
+        if (error.code === 404) {
+             return res.status(404).json({ success: false, message: 'Compra não encontrada. Verifique o purchaseToken.' });
+        }
+        return res.status(500).json({ success: false, message: 'Erro interno ao validar a compra.', error: error.message });
+    }
+});
+
 // --- ROTAS DE CRON JOB ---
 
 // Rota para postar o código diário no blog
