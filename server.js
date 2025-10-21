@@ -212,7 +212,14 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
 // ADICIONE ESTE BLOCO DE CÓDIGO NO SERVER.JS
 
-// --- NOVAS ROTAS DE ADMIN PARA GERENCIAMENTO DE USUÁRIO ---
+// COLE ESTE BLOCO CORRIGIDO NO LUGAR DO QUE VOCÊ APAGOU
+
+// --- NOVAS ROTAS DE ADMIN E GOOGLE PLAY ---
+
+const { google } = require('googleapis');
+
+// Inicializa o cliente da API do Google Play
+const androidpublisher = google.androidpublisher('v3');
 
 // Middleware de verificação de admin para proteger as rotas
 const isAdmin = async (req, res, next) => {
@@ -275,13 +282,6 @@ app.post('/admin/toggle-user-status', isAdmin, async (req, res) => {
         res.status(500).json({ message: "Falha ao alterar status do usuário.", error: error.message });
     }
 });
-
-// ADICIONE ESTE BLOCO DE CÓDIGO INTEIRO NO SEU SERVER.JS
-
-const { google } = require('googleapis');
-
-// Inicializa o cliente da API do Google Play
-const androidpublisher = google.androidpublisher('v3');
 
 // Função auxiliar para ativar o benefício no Firestore
 async function activateBenefitInFirestore(uid, sku) {
