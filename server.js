@@ -386,6 +386,36 @@ app.post('/google-play/validate-purchase', async (req, res) => {
     }
 });
 
+// Rota para buscar detalhes de um usuário (Auth e Firestore)
+app.post('/admin/get-user-details', isAdmin, async (req, res) => {
+    const { targetUid } = req.body;
+    if (!targetUid) {
+        return res.status(400).json({ message: "ID do usuário alvo é obrigatório." });
+    }
+
+    try {
+        // Busca os dados de autenticação (como email, se está desabilitado, etc.)
+        const userRecord = await admin.auth().getUser(targetUid);
+        
+        // Busca os dados do banco de dados (como nome, saldo, tipo, etc.)
+        const firestoreDoc = await db.collection('usuarios').doc(targetUid).get();
+
+        if (!firestoreDoc.exists) {
+            return res.status(404).json({ message: "Usuário não encontrado no Firestore." });
+        }
+
+        // Combina os dados e envia de volta para o frontend
+        res.status(200).json({
+            auth: userRecord.toJSON(),
+            firestore: firestoreDoc.data()
+        });
+
+    } catch (error) {
+        console.error("Erro ao buscar detalhes do usuário:", error);
+        res.status(500).json({ message: "Falha ao buscar detalhes do usuário.", error: error.message });
+    }
+});
+
 // --- ROTAS DE CRON JOB ---
 
 // Rota para postar o código diário no blog
