@@ -106,8 +106,7 @@ async function sendNotification(uid, title, body, data = {}) {
     }
 }
 
-setInterval(calcularRankingClientes, 60 * 60 * 1000); // Roda a cada hora
-setInterval(calcularRankingBarbeiros, 60 * 60 * 1000); // Roda a cada hora
+
 // --- ROTAS DA API ---
 
 // Rota para notificação individual (usada em todo o app)
@@ -283,62 +282,6 @@ app.post('/admin/toggle-user-status', isAdmin, async (req, res) => {
         res.status(500).json({ message: "Falha ao alterar status do usuário.", error: error.message });
     }
 });
-
-// --- FUNÇÃO PARA CALCULAR RANKING DOS CLIENTES (POR AGENDAMENTOS) ---
-async function calcularRankingClientes() {
-    try {
-        // Ordena por 'cortesRealizados' (agendamentos concluídos) em ordem decrescente
-        const usuariosSnapshot = await db.collection('usuarios')
-            .where('tipo', '==', 'cliente') // Apenas clientes
-            .orderBy('cortesRealizados', 'desc')
-            .limit(100) // Pega os top 100
-            .get();
-
-        const ranking = usuariosSnapshot.docs.map(doc => {
-            const user = doc.data();
-            return {
-                uid: doc.id,
-                nome: user.nome,
-                contagem: user.cortesRealizados || 0 // Usa a contagem de cortes
-            };
-        });
-        // Salva no documento config/rankingClientes
-        await db.collection('config').doc('rankingClientes').set({
-            ranking: ranking,
-            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
-        });
-        console.log('Ranking de clientes (por agendamentos) atualizado.');
-    } catch (error) { console.error('Erro ao calcular ranking de clientes:', error); }
-}
-
-// --- FUNÇÃO PARA CALCULAR RANKING DOS BARBEIROS (POR CORTES) ---
-async function calcularRankingBarbeiros() {
-    try {
-        // Ordena por 'clientesAtendidos' (cortes concluídos) em ordem decrescente
-        const barbeirosSnapshot = await db.collection('usuarios')
-             // Inclui todos os tipos de profissionais
-            .where('tipo', 'in', ['barbeiro', 'manicure_pedicure', 'designer_cilios'])
-            .orderBy('clientesAtendidos', 'desc')
-            .limit(100) // Pega os top 100
-            .get();
-
-        const ranking = barbeirosSnapshot.docs.map(doc => {
-            const user = doc.data();
-            return {
-                uid: doc.id,
-                nome: user.nome,
-                contagem: user.clientesAtendidos || 0 // Usa a contagem de atendimentos
-            };
-        });
-        // Salva no documento config/rankingBarbeiros
-        await db.collection('config').doc('rankingBarbeiros').set({
-            ranking: ranking,
-            atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
-        });
-        console.log('Ranking de profissionais (por cortes) atualizado.');
-    } catch (error) { console.error('Erro ao calcular ranking de profissionais:', error); }
-}
-
 
 // Função auxiliar para ativar o benefício no Firestore
 async function activateBenefitInFirestore(uid, sku) {
