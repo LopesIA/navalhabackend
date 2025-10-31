@@ -24,6 +24,106 @@ try {
 const app = express();
 const db = admin.firestore();
 
+// ... logo após const db = admin.firestore();
+
+// --- LÓGICA DO BOT DE MENSAGENS ---
+const botMessages = [
+  // Categoria: Dicas para Clientes
+  "Dica: Avalie seu profissional após o serviço para ganhar pontos de fidelidade e ajudar a comunidade!",
+  "Você sabia? Indicando um amigo com seu e-mail, vocês dois ganham 100 pontos de fidelidade após o primeiro agendamento dele!",
+  "Mantenha seu saldo atualizado! Use a função de depósito 💰 para adicionar créditos de forma rápida e segura.",
+  "Torne-se VIP 💎 para ter 10% de desconto em todos os serviços e ganhar o dobro de pontos de fidelidade!",
+  "Fique de olho no nosso Blog 📰! Postamos códigos de resgate valendo pontos. Procure por códigos entre (parênteses)!",
+  "Explore a nossa Loja 🛍️! Produtos exclusivos da comunidade estão disponíveis para você.",
+  "Complete agendamentos e desbloqueie conquistas 🏅 para mostrar seu status no chat!",
+  "O chat local 📍 é perfeito para conversar com pessoas da sua cidade sobre tendências e profissionais.",
+  "Seu saldo na carteira 💰 pode ser usado para pagar serviços, produtos da loja, VIP e mais!",
+  "Encontrou um bug? Reporte para o administrador usando o botão 🚨 para nos ajudar a melhorar.",
+  "Verifique a seção 'Minhas Compras' 🛍️ para acompanhar o status dos seus pedidos da loja.",
+  "Clientes: Se o profissional estiver com a ⚡ 'Vaga Imediata', você não precisa marcar horário, é só ir!",
+  "Usar o mapa 🗺️ no perfil do profissional abre a rota mais rápida até ele.",
+  
+  // Categoria: Dicas para Profissionais
+  "Profissionais: Mantenham sua agenda 📅 atualizada para evitar conflitos e cancelamentos.",
+  "Profissionais: Turbinar seu perfil 🚀 o coloca no topo da lista por 24 horas! Use para atrair mais clientes.",
+  "Profissionais: Tornar-se PRO 🌟 zera ou diminui suas taxas de serviço. Confira os planos!",
+  "Uma boa foto de logomarca 🎨 e um portfólio 🖼️ completo aumentam sua credibilidade e atraem mais clientes.",
+  "Profissionais: Responda suas avaliações ⭐ para mostrar aos clientes que você se importa.",
+  "Profissionais: Use o 'Modo Férias' 🏖️ para bloquear sua agenda quando for se ausentar.",
+  "Profissionais: Criar promoções 🎁 é uma ótima forma de atrair clientes em dias de menor movimento.",
+  "Profissionais: O Dashboard 🚀 mostra seu desempenho, faturamento e serviços mais populares.",
+  "Profissionais: Adicione notas sobre seus clientes 🧑‍🤝‍🧑 para lembrar de preferências e detalhes importantes.",
+
+  // Categoria: Geral
+  "Mantenha o respeito no chat global 🌎. Mensagens ofensivas podem levar a banimento.",
+  "Sua segurança é importante. Nunca compartilhe sua senha com ninguém.",
+  "Instale o app na sua tela inicial 📱 para uma experiência mais rápida e notificações em tempo real.",
+  "Precisa de ajuda ou tem uma sugestão? Use a opção 🚨 no canto inferior para falar diretamente com um administrador.",
+  "A reputação ⭐ do profissional é baseada nas avaliações dos clientes. Ajude a comunidade avaliando!",
+  
+  // Adicione mais 75 mensagens aqui para completar as 100
+  // Exemplo:
+  "Dica: Verifique seu histórico 📜 para ver todos os serviços que você já realizou.",
+  "O programa de fidelidade 🏆 permite trocar pontos por saldo na carteira!",
+  "Profissionais: Um portfólio com boas fotos dos seus trabalhos é seu melhor cartão de visita.",
+  "Clientes: Favorite seus profissionais preferidos para encontrá-los mais rápido (funcionalidade em breve!).",
+  "O Nova Versão é mais que um app, é uma comunidade. Participe!",
+  "Profissionais: A 'Vaga Imediata' ⚡ é perfeita para preencher horários vagos inesperadamente.",
+  "Lembre-se: O pagamento é feito 100% pelo app, garantindo sua segurança e do profissional.",
+  "Viu um produto legal na loja 🛍️? Você pode comprar direto pelo app com seu saldo.",
+  "Problemas com um pagamento? Entre em contato com o suporte 🚨 imediatamente.",
+  "Profissionais: O plano PRO 🌟 Ouro ZERA sua taxa de serviço. Todo o valor do serviço (menos taxa do cartão) é seu!",
+  "Cada conquista 🏅 desbloqueada te dá um novo ícone no chat. Colecione todos!",
+  "O ranking 📊 mostra quem são os clientes e profissionais mais ativos da plataforma.",
+  "Quer vender seus produtos? Solicite o acesso à loja 🏪 nas suas configurações ⚙️.",
+  "Ao comprar na loja, lembre-se de confirmar o recebimento ✅ para liberar o pagamento ao vendedor.",
+  "Profissionais: O chat local 📍 é um ótimo lugar para divulgar seu trabalho para pessoas da sua cidade.",
+  "Usar o app Nova Versão ajuda a fortalecer os profissionais locais da sua região.",
+  "Sua opinião é importante! Envie sugestões para o administrador pelo botão 🚨.",
+  "Mantenha seu app atualizado para receber as últimas melhorias e correções.",
+  "Dica de segurança: Use uma senha forte e única para sua conta.",
+  "Profissionais: Otimizem o tempo ⏰ dos seus serviços para que a agenda funcione perfeitamente.",
+  // ... continue até 100
+];
+let lastBotMessageIndex = -1;
+
+async function sendBotMessage() {
+    try {
+        let randomIndex;
+        do {
+            randomIndex = Math.floor(Math.random() * botMessages.length);
+        } while (randomIndex === lastBotMessageIndex && botMessages.length > 1); // Evita loop se só tiver 1 msg
+        lastBotMessageIndex = randomIndex;
+
+        const textoBot = botMessages[randomIndex];
+        const deleteAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // Expira em 24h
+
+        await db.collection("chats").doc("chatGlobal").collection("mensagens").add({
+            remetenteUid: "bot-uid",
+            remetenteNome: "Nova Versão Bot",
+            tipo: "bot",
+            texto: textoBot,
+            ts: admin.firestore.FieldValue.serverTimestamp(),
+            cidade: "global", // Bot fala no chat global
+            tipoChat: "global", // Bot fala no chat global
+            deleteAt: admin.firestore.Timestamp.fromDate(deleteAt)
+        });
+        console.log(`[BOT] Mensagem enviada: "${textoBot.substring(0, 50)}..."`);
+    } catch (error) {
+        console.error("[BOT] Erro ao enviar mensagem:", error);
+    }
+}
+
+// Inicia o bot para enviar mensagem a cada 5 minutos (300000 ms)
+// Apenas em ambiente de produção (RENDER) para não rodar localmente
+if (process.env.NODE_ENV === 'production' || process.env.PORT) { // Verifica se está no Render
+    setInterval(sendBotMessage, 300000); 
+    console.log("[BOT] Bot de mensagens ativado. Enviando a cada 5 minutos.");
+} else {
+    console.log("[BOT] Bot de mensagens desativado em ambiente local.");
+}
+// --- FIM DA LÓGICA DO BOT ---
+
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
 // Permite que apenas seu app web se comunique com este backend.
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
@@ -239,49 +339,70 @@ const isAdmin = async (req, res, next) => {
 };
 
 // Rota para atualizar dados do usuário no Firestore
-app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
+ app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
+    // Não desestruture 'adminUid' aqui para não enviar ao Firestore
     const { targetUid, updates } = req.body;
     if (!targetUid || !updates) {
         return res.status(400).json({ message: "ID do usuário e dados para atualização são obrigatórios." });
     }
     try {
-        await db.collection('usuarios').doc(targetUid).update(updates);
+        // Adiciona o timestamp para forçar o reload no cliente
+        const finalUpdates = {
+            ...updates,
+            forceReloadTimestamp: admin.firestore.FieldValue.serverTimestamp() // <-- ADICIONADO AQUI
+        };
+
+        await db.collection('usuarios').doc(targetUid).update(finalUpdates);
         res.status(200).json({ message: "Dados do usuário atualizados no Firestore com sucesso." });
     } catch (error) {
         console.error("Erro ao atualizar dados do usuário no Firestore:", error);
         res.status(500).json({ message: "Falha ao atualizar dados.", error: error.message });
     }
-});
+ });
 
 // Rota para definir uma nova senha para o usuário
-app.post('/admin/reset-user-password', isAdmin, async (req, res) => {
+ app.post('/admin/reset-user-password', isAdmin, async (req, res) => {
+    // Não desestruture 'adminUid' aqui
     const { targetUid, newPassword } = req.body;
     if (!targetUid || !newPassword || newPassword.length < 6) {
         return res.status(400).json({ message: "ID do usuário e uma nova senha de no mínimo 6 caracteres são obrigatórios." });
     }
     try {
         await admin.auth().updateUser(targetUid, { password: newPassword });
+
+        // Adiciona o timestamp para forçar o reload no cliente após reset de senha
+        await db.collection('usuarios').doc(targetUid).update({
+             forceReloadTimestamp: admin.firestore.FieldValue.serverTimestamp() // <-- ADICIONADO AQUI
+        });
+
         res.status(200).json({ message: "Senha do usuário alterada com sucesso." });
     } catch (error) {
         console.error("Erro ao redefinir senha de usuário:", error);
         res.status(500).json({ message: "Falha ao redefinir senha.", error: error.message });
     }
-});
+ });
 
 // Rota para habilitar/desabilitar uma conta de usuário
-app.post('/admin/toggle-user-status', isAdmin, async (req, res) => {
+ app.post('/admin/toggle-user-status', isAdmin, async (req, res) => {
+    // Não desestruture 'adminUid' aqui
     const { targetUid, disable } = req.body; // 'disable' deve ser true ou false
     if (!targetUid || typeof disable !== 'boolean') {
         return res.status(400).json({ message: "ID do usuário e status (disable: true/false) são obrigatórios." });
     }
     try {
         await admin.auth().updateUser(targetUid, { disabled: disable });
+
+        // Adiciona o timestamp para forçar o reload no cliente após mudança de status
+        await db.collection('usuarios').doc(targetUid).update({
+             forceReloadTimestamp: admin.firestore.FieldValue.serverTimestamp() // <-- ADICIONADO AQUI
+        });
+
         res.status(200).json({ message: `Usuário ${disable ? 'desabilitado' : 'habilitado'} com sucesso.` });
     } catch (error) {
         console.error("Erro ao alterar status do usuário:", error);
         res.status(500).json({ message: "Falha ao alterar status do usuário.", error: error.message });
     }
-});
+ });
 
 // Função auxiliar para ativar o benefício no Firestore
 async function activateBenefitInFirestore(uid, sku) {
