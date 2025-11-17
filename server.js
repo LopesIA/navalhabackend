@@ -405,39 +405,62 @@ const isAdmin = async (req, res, next) => {
  });
 
 // Função auxiliar para ativar o benefício no Firestore
+// SUBSTITUA a função 'activateBenefitInFirestore' inteira (Linha ~501) por esta:
+
 async function activateBenefitInFirestore(uid, sku) {
     const userRef = db.collection('usuarios').doc(uid);
     const expiracao = new Date();
     let updates = {};
 
-    switch (sku) {
-        case 'adesao_vip_6_meses':
-            expiracao.setDate(expiracao.getDate() + 180);
-            updates = {
-                vip: true,
-                vipExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
-            };
-            break;
-        case 'turbinar_perfil_24h':
-            expiracao.setHours(expiracao.getHours() + 24);
-            updates = {
-                boostExpiracao: admin.firestore.Timestamp.fromDate(expiracao),
-                ultimoBoostComprado: admin.firestore.FieldValue.serverTimestamp()
-            };
-            break;
-        case 'pro_tier1':
-        case 'pro_tier2':
-        case 'pro_tier3':
-            expiracao.setDate(expiracao.getDate() + 30);
-            const tier = sku.split('_')[1]; // extrai 'tier1', 'tier2', etc.
-            updates = {
-                proAtivo: true,
-                proTier: tier,
-                proExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
-            };
-            break;
-        default:
-            throw new Error(`SKU desconhecido: ${sku}`);
+    // --- INÍCIO DA MUDANÇA: Adicionando SKUs de depósito ---
+    // Procura por SKUs no formato 'deposito_VALOR' (ex: deposito_10, deposito_50)
+    const depositoMatch = sku.match(/^deposito_(\d+)$/); 
+    
+    if (depositoMatch && depositoMatch[1]) {
+        const valorDeposito = parseInt(depositoMatch[1], 10);
+        if (isNaN(valorDeposito) || valorDeposito <= 0) {
+            throw new Error(`SKU de depósito inválido: ${sku}`);
+        }
+        
+        console.log(`Processando depósito de R$ ${valorDeposito} para ${uid}`);
+        updates = {
+            saldo: admin.firestore.FieldValue.increment(valorDeposito)
+            // Você pode adicionar pontos de fidelidade por depósito aqui, se quiser:
+            // pontosFidelidade: admin.firestore.FieldValue.increment(pontosGanhos) 
+        };
+    // --- FIM DA MUDANÇA ---
+
+    } else {
+        // Lógica existente para VIP, PRO, etc.
+        switch (sku) {
+            case 'adesao_vip_6_meses':
+                expiracao.setDate(expiracao.getDate() + 180);
+                updates = {
+                    vip: true,
+                    vipExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
+                };
+                break;
+            case 'turbinar_perfil_24h':
+                expiracao.setHours(expiracao.getHours() + 24);
+                updates = {
+                    boostExpiracao: admin.firestore.Timestamp.fromDate(expiracao),
+                    ultimoBoostComprado: admin.firestore.FieldValue.serverTimestamp()
+                };
+                break;
+            case 'pro_tier1':
+            case 'pro_tier2':
+            case 'pro_tier3':
+                expiracao.setDate(expiracao.getDate() + 30);
+                const tier = sku.split('_')[1]; // extrai 'tier1', 'tier2', etc.
+                updates = {
+                    proAtivo: true,
+                    proTier: tier,
+                    proExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
+                };
+                break;
+            default:
+                throw new Error(`SKU desconhecido: ${sku}`);
+        }
     }
 
     await userRef.update(updates);
@@ -694,6 +717,92 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
+app.get('/cron/enviar-lembretes', async (req, res) => {
+    const { key } = req.query;
+
+    // 1. Validação da Chave Secreta
+    if (key !== process.env.CRON_SECRET_KEY) {
+        console.warn(`[CRON Lembretes] Tentativa de acesso não autorizado.`);
+        return res.status(401).send('ERRO: Chave inválida.');
+    }
+
+    console.log("[CRON Lembretes] Iniciando verificação de lembretes...");
+
+    try {
+        const agora = new Date();
+        // Define o período da janela de lembrete (ex: entre 2 e 3 horas a partir de agora)
+        const inicioJanela = new Date(agora.getTime() + 2 * 60 * 60 * 1000); // 2 horas a partir de agora
+        const fimJanela = new Date(agora.getTime() + 3 * 60 * 60 * 1000);   // 3 horas a partir de agora
+
+        // Converte as datas para o formato de string H:mm (ex: "14:30")
+        // IMPORTANTE: Seu banco de dados salva o horário como string (ex: "14:30").
+        // Esta lógica só funciona para agendamentos no MESMO DIA.
+        const horaInicio = `${inicioJanela.getHours()}:${inicioJanela.getMinutes().toString().padStart(2, '0')}`;
+        const horaFim = `${fimJanela.getHours()}:${fimJanela.getMinutes().toString().padStart(2, '0')}`;
+        
+        // Busca agendamentos 'confirmados' (que no seu código é 'conclusão pendente'), 
+        // que ainda não tiveram lembrete enviado,
+        // e cujo horário (string) esteja dentro da nossa janela.
+        const query = db.collection('agendamentos')
+            .where('status', '==', 'conclusão pendente') // Você usa 'conclusão pendente' após aprovar
+            .where('lembreteEnviado', '==', false)
+            .where('horario', '>=', horaInicio)
+            .where('horario', '<=', horaFim);
+
+        const snapshot = await query.get();
+
+        if (snapshot.empty) {
+            console.log(`[CRON Lembretes] Nenhum agendamento encontrado entre ${horaInicio} e ${horaFim}.`);
+            return res.status(200).send('OK: Nenhum lembrete para enviar.');
+        }
+
+        console.log(`[CRON Lembretes] ${snapshot.size} lembretes para enviar.`);
+        let enviados = 0;
+        const batch = db.batch();
+
+        for (const doc of snapshot.docs) {
+            const ag = doc.data();
+            const agendamentoId = doc.id;
+
+            // Evita enviar lembrete se o agendamento for de um dia anterior (caso a query pegue lixo)
+            if (ag.ts.toDate() < new Date(agora.getTime() - 24 * 60 * 60 * 1000)) {
+                continue; // Pula agendamentos muito antigos
+            }
+
+            // Prepara para marcar como enviado
+            const agendamentoRef = db.collection('agendamentos').doc(agendamentoId);
+            batch.update(agendamentoRef, { lembreteEnviado: true });
+
+            // Envia notificação para o Cliente
+            // (Usando sua função sendNotification que já existe no server.js)
+            sendNotification(
+                ag.clienteUid,
+                '🔔 Lembrete de Agendamento!',
+                `Seu horário com ${ag.barbeiroNome} (${ag.servico}) é logo mais, às ${ag.horario}! Não se atrase.`,
+                { link: '#historico' }
+            );
+
+            // Envia notificação para o Profissional
+            sendNotification(
+                ag.barbeiroUid,
+                '🔔 Lembrete de Cliente!',
+                `Seu horário com ${ag.clienteNome} (${ag.servico}) é às ${ag.horario}. Prepare-se para atendê-lo(a).`,
+                { link: '#agendamentos' }
+            );
+            
+            enviados++;
+        }
+
+        await batch.commit(); // Marca todos como enviados no DB
+        
+        console.log(`[CRON Lembretes] ${enviados} lembretes enviados com sucesso.`);
+        res.status(200).send(`OK: ${enviados} lembretes enviados.`);
+
+    } catch (error) {
+        console.error('[CRON Lembretes] Erro ao executar tarefa:', error);
+        res.status(500).send('ERRO: Falha ao executar a tarefa de lembretes.');
+    }
+});
 
 // Rota de saúde para o Render saber que o app está no ar
 app.get('/', (req, res) => {
