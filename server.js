@@ -596,7 +596,7 @@ const LIMITES_GIROS = {
     'tier4': 5 
 };
 
-// Rota da Roleta Segura (ATUALIZADA: VIP = 4 Giros)
+// Rota da Roleta Segura (ATUALIZADA: Admin Ilimitado)
 app.post('/api/girar-roleta', async (req, res) => {
     const { uid } = req.body;
 
@@ -612,10 +612,10 @@ app.post('/api/girar-roleta', async (req, res) => {
             const perfil = userDoc.data();
             const hoje = new Date().toDateString();
 
-            // 1. Verifica Limites de Giros
+            // --- 1. Verifica Limites de Giros ---
             let girosTotais = 1; // Padrão
 
-            // Lógica VIP (Nova Versão: VIP ganha 4 giros)
+            // Lógica VIP
             if (perfil.vip && perfil.vipExpirationDate) {
                 const expiracaoVip = perfil.vipExpirationDate.toDate();
                 if (expiracaoVip > new Date()) {
@@ -623,12 +623,11 @@ app.post('/api/girar-roleta', async (req, res) => {
                 }
             }
 
-            // Lógica PRO (Prevalece se for maior que o VIP)
+            // Lógica PRO
             if (perfil.proAtivo && perfil.proExpirationDate) {
                 const expiracao = perfil.proExpirationDate.toDate();
                 if (expiracao > new Date()) {
                     if (perfil.proTier && LIMITES_GIROS[perfil.proTier]) {
-                        // Se o tier PRO der mais que 4, usa o do PRO. Se der menos, mantém os 4 do VIP (se for VIP).
                         const girosPro = LIMITES_GIROS[perfil.proTier];
                         if (girosPro > girosTotais) girosTotais = girosPro;
                     }
@@ -638,32 +637,33 @@ app.post('/api/girar-roleta', async (req, res) => {
             const isNovoDia = perfil.ultimoGiroRoleta !== hoje;
             let girosRealizados = perfil.girosRealizadosHoje || 0;
 
-            // Se virou o dia:
-            // Só zera se o número for positivo (giros gastos).
-            // Se for negativo (crédito dado pelo admin), mantém o crédito para o novo dia.
             if (isNovoDia && girosRealizados > 0) {
                 girosRealizados = 0;
             }
 
-            if (girosRealizados >= girosTotais) {
-                throw new Error("Sem giros disponíveis para hoje.");
+            // --- ALTERAÇÃO 1: Admin ignora o limite ---
+            if (perfil.tipo !== 'admin') { 
+                if (girosRealizados >= girosTotais) {
+                    throw new Error("Sem giros disponíveis para hoje.");
+                }
             }
 
-            // 2. Sorteio
+            // --- 2. Sorteio ---
             const targetIndex = Math.floor(Math.random() * 20);
             const premioGanho = ARRAY_PREMIOS_SERVER[targetIndex];
 
-            // 3. Prepara Updates
+            // --- 3. Prepara Updates ---
             let updates = { 
                 ultimoGiroRoleta: hoje,
-                // Incrementa 1 no uso. Se estava -5 (crédito admin), vira -4.
+                // Se for admin, não incrementa o contador para não travar no futuro (opcional), 
+                // mas aqui vamos incrementar para você ter controle de quantos giros fez.
                 girosRealizadosHoje: isNovoDia && girosRealizados > 0 ? 1 : admin.firestore.FieldValue.increment(1)
             };
             
             let msgRetorno = "";
             let tipoPr = "";
 
-            // Lógica de Prêmios (Mantida)
+            // Lógica de Prêmios (Mantida igual)
             if (premioGanho.tipo === 'ponto') {
                 updates.pontosFidelidade = admin.firestore.FieldValue.increment(premioGanho.valor);
                 msgRetorno = `Você ganhou ${premioGanho.valor} pontos de fidelidade!`;
@@ -679,9 +679,7 @@ app.post('/api/girar-roleta', async (req, res) => {
                 
                 if (mapaPremios[chaveSimples]) {
                     const existingDate = mapaPremios[chaveSimples].toDate();
-                    if (existingDate > new Date()) {
-                        baseDate = existingDate;
-                    }
+                    if (existingDate > new Date()) baseDate = existingDate;
                 }
 
                 baseDate.setHours(baseDate.getHours() + 24); 
@@ -691,6 +689,7 @@ app.post('/api/girar-roleta', async (req, res) => {
                 tipoPr = "item";
             } 
             else if (premioGanho.tipo === 'caixa') {
+                // Lógica da caixa mantida...
                 if (perfil.tipo !== 'cliente') {
                     let baseDate = new Date();
                     if (perfil.boostExpiracao && perfil.boostExpiracao.toDate() > new Date()) {
