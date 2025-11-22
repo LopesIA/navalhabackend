@@ -596,7 +596,7 @@ const LIMITES_GIROS = {
     'tier4': 5 
 };
 
-// Rota da Roleta Segura
+// Rota da Roleta Segura (CORRIGIDA: Preserva giros extras do Admin)
 app.post('/api/girar-roleta', async (req, res) => {
     const { uid } = req.body;
 
@@ -605,7 +605,6 @@ app.post('/api/girar-roleta', async (req, res) => {
     try {
         const userRef = db.collection('usuarios').doc(uid);
         
-        // Usa transação para garantir que não haja giros simultâneos fraudulentos
         const result = await db.runTransaction(async (t) => {
             const userDoc = await t.get(userRef);
             if (!userDoc.exists) throw new Error("Usuário não encontrado.");
@@ -614,9 +613,7 @@ app.post('/api/girar-roleta', async (req, res) => {
             const hoje = new Date().toDateString();
 
             // 1. Verifica Limites de Giros
-            let girosTotais = 1; // Padrão (Gratuito)
-            
-            // Verifica se é PRO ativo e define limite
+            let girosTotais = 1; 
             if (perfil.proAtivo && perfil.proExpirationDate) {
                 const expiracao = perfil.proExpirationDate.toDate();
                 if (expiracao > new Date()) {
@@ -627,28 +624,33 @@ app.post('/api/girar-roleta', async (req, res) => {
             }
 
             const isNovoDia = perfil.ultimoGiroRoleta !== hoje;
-            let girosRealizados = isNovoDia ? 0 : (perfil.girosRealizadosHoje || 0);
+            let girosRealizados = perfil.girosRealizadosHoje || 0;
+
+            // CORREÇÃO: Se virou o dia, só zera se o usuário já gastou os giros (positivo).
+            // Se for negativo (crédito do admin), mantém o valor.
+            if (isNovoDia && girosRealizados > 0) {
+                girosRealizados = 0;
+            }
 
             if (girosRealizados >= girosTotais) {
                 throw new Error("Sem giros disponíveis para hoje.");
             }
 
-            // 2. Sorteio do Prêmio (RNG no Servidor)
-            // Dica de Segurança: Aqui você pode manipular as probabilidades se quiser que Diamante seja mais raro.
-            // Por enquanto, mantive aleatório uniforme (1/20) para simplificar.
+            // 2. Sorteio
             const targetIndex = Math.floor(Math.random() * 20);
             const premioGanho = ARRAY_PREMIOS_SERVER[targetIndex];
 
             // 3. Prepara Updates
             let updates = { 
                 ultimoGiroRoleta: hoje,
-                girosRealizadosHoje: isNovoDia ? 1 : admin.firestore.FieldValue.increment(1)
+                // Incrementa 1 no uso. Se estava -999 (crédito), vira -998.
+                girosRealizadosHoje: isNovoDia && girosRealizados > 0 ? 1 : admin.firestore.FieldValue.increment(1)
             };
             
             let msgRetorno = "";
             let tipoPr = "";
 
-            // Lógica de Entrega dos Prêmios
+            // Lógica de Prêmios (Mantida igual)
             if (premioGanho.tipo === 'ponto') {
                 updates.pontosFidelidade = admin.firestore.FieldValue.increment(premioGanho.valor);
                 msgRetorno = `Você ganhou ${premioGanho.valor} pontos de fidelidade!`;
@@ -658,46 +660,39 @@ app.post('/api/girar-roleta', async (req, res) => {
                 const tipoItem = premioGanho.tipo === 'moldura' ? 'Moldura' : 'Estilo de Chat';
                 const chaveObjeto = premioGanho.tipo === 'moldura' ? `premiosTemporarios.moldura_${premioGanho.key}` : `premiosTemporarios.balao_${premioGanho.key}`;
                 
-                // Lógica de Acumular Tempo
                 let baseDate = new Date();
-                // Verifica data atual no banco
                 const mapaPremios = perfil.premiosTemporarios || {};
                 const chaveSimples = premioGanho.tipo === 'moldura' ? `moldura_${premioGanho.key}` : `balao_${premioGanho.key}`;
                 
                 if (mapaPremios[chaveSimples]) {
                     const existingDate = mapaPremios[chaveSimples].toDate();
                     if (existingDate > new Date()) {
-                        baseDate = existingDate; // Acumula a partir da data futura
+                        baseDate = existingDate;
                     }
                 }
 
-                baseDate.setHours(baseDate.getHours() + 24); // +24 Horas
+                baseDate.setHours(baseDate.getHours() + 24); 
                 updates[chaveObjeto] = admin.firestore.Timestamp.fromDate(baseDate);
                 
                 msgRetorno = `Sorte Grande! Você ganhou **${tipoItem} ${premioGanho.nome}** por +24 horas! (Acumulado)`;
                 tipoPr = "item";
             } 
             else if (premioGanho.tipo === 'caixa') {
-                // Lógica da Caixa Misteriosa
                 if (perfil.tipo !== 'cliente') {
-                    // Profissional: Ganha Boost
                     let baseDate = new Date();
                     if (perfil.boostExpiracao && perfil.boostExpiracao.toDate() > new Date()) {
                         baseDate = perfil.boostExpiracao.toDate();
                     }
                     baseDate.setHours(baseDate.getHours() + 24);
-                    
                     updates.boostExpiracao = admin.firestore.Timestamp.fromDate(baseDate);
                     updates.ultimoBoostComprado = admin.firestore.FieldValue.serverTimestamp();
                     msgRetorno = "Você ganhou +24 horas de Perfil Turbinado (Acumulado)!";
                 } else {
-                    // Cliente: Ganha VIP
                     let baseDate = new Date();
                     if (perfil.vip && perfil.vipExpirationDate && perfil.vipExpirationDate.toDate() > new Date()) {
                         baseDate = perfil.vipExpirationDate.toDate();
                     }
-                    baseDate.setDate(baseDate.getDate() + 5); // +5 Dias
-                    
+                    baseDate.setDate(baseDate.getDate() + 5);
                     updates.vip = true;
                     updates.vipExpirationDate = admin.firestore.Timestamp.fromDate(baseDate);
                     msgRetorno = "Incrível! Você ganhou +5 Dias de VIP Grátis (Acumulado)!";
@@ -705,9 +700,7 @@ app.post('/api/girar-roleta', async (req, res) => {
                 tipoPr = "caixa";
             }
 
-            // Aplica Updates
             t.update(userRef, updates);
-
             return { targetIndex, msgRetorno, tipoPr };
         });
 
@@ -718,9 +711,6 @@ app.post('/api/girar-roleta', async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
-// ==================================================================
-// === FIM: LÓGICA SEGURA DA ROLETA ===
-// ==================================================================
 
 // --- ROTAS DE CRON JOB ---
 
