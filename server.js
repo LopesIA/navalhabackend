@@ -596,7 +596,7 @@ const LIMITES_GIROS = {
     'tier4': 5 
 };
 
-// Rota da Roleta Segura (CORRIGIDA: Preserva giros extras do Admin)
+// Rota da Roleta Segura (ATUALIZADA: VIP = 4 Giros)
 app.post('/api/girar-roleta', async (req, res) => {
     const { uid } = req.body;
 
@@ -613,12 +613,24 @@ app.post('/api/girar-roleta', async (req, res) => {
             const hoje = new Date().toDateString();
 
             // 1. Verifica Limites de Giros
-            let girosTotais = 1; 
+            let girosTotais = 1; // Padrão
+
+            // Lógica VIP (Nova Versão: VIP ganha 4 giros)
+            if (perfil.vip && perfil.vipExpirationDate) {
+                const expiracaoVip = perfil.vipExpirationDate.toDate();
+                if (expiracaoVip > new Date()) {
+                    if (girosTotais < 4) girosTotais = 4;
+                }
+            }
+
+            // Lógica PRO (Prevalece se for maior que o VIP)
             if (perfil.proAtivo && perfil.proExpirationDate) {
                 const expiracao = perfil.proExpirationDate.toDate();
                 if (expiracao > new Date()) {
                     if (perfil.proTier && LIMITES_GIROS[perfil.proTier]) {
-                        girosTotais = LIMITES_GIROS[perfil.proTier];
+                        // Se o tier PRO der mais que 4, usa o do PRO. Se der menos, mantém os 4 do VIP (se for VIP).
+                        const girosPro = LIMITES_GIROS[perfil.proTier];
+                        if (girosPro > girosTotais) girosTotais = girosPro;
                     }
                 }
             }
@@ -626,8 +638,9 @@ app.post('/api/girar-roleta', async (req, res) => {
             const isNovoDia = perfil.ultimoGiroRoleta !== hoje;
             let girosRealizados = perfil.girosRealizadosHoje || 0;
 
-            // CORREÇÃO: Se virou o dia, só zera se o usuário já gastou os giros (positivo).
-            // Se for negativo (crédito do admin), mantém o valor.
+            // Se virou o dia:
+            // Só zera se o número for positivo (giros gastos).
+            // Se for negativo (crédito dado pelo admin), mantém o crédito para o novo dia.
             if (isNovoDia && girosRealizados > 0) {
                 girosRealizados = 0;
             }
@@ -643,14 +656,14 @@ app.post('/api/girar-roleta', async (req, res) => {
             // 3. Prepara Updates
             let updates = { 
                 ultimoGiroRoleta: hoje,
-                // Incrementa 1 no uso. Se estava -999 (crédito), vira -998.
+                // Incrementa 1 no uso. Se estava -5 (crédito admin), vira -4.
                 girosRealizadosHoje: isNovoDia && girosRealizados > 0 ? 1 : admin.firestore.FieldValue.increment(1)
             };
             
             let msgRetorno = "";
             let tipoPr = "";
 
-            // Lógica de Prêmios (Mantida igual)
+            // Lógica de Prêmios (Mantida)
             if (premioGanho.tipo === 'ponto') {
                 updates.pontosFidelidade = admin.firestore.FieldValue.increment(premioGanho.valor);
                 msgRetorno = `Você ganhou ${premioGanho.valor} pontos de fidelidade!`;
