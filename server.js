@@ -560,6 +560,168 @@ app.post('/admin/get-user-details', isAdmin, async (req, res) => {
     }
 });
 
+// ==================================================================
+// === INÍCIO: LÓGICA SEGURA DA ROLETA (SERVER-SIDE) ===
+// ==================================================================
+
+// Definição dos Prêmios (Deve bater com a ordem visual do Front-end)
+const ARRAY_PREMIOS_SERVER = [
+    { tipo: 'ponto', valor: 1 },           // 0
+    { tipo: 'moldura', key: 'bronze', nome: 'Bronze' }, // 1
+    { tipo: 'ponto', valor: 2 },           // 2
+    { tipo: 'balao', key: 'bronze', nome: 'Chat Bronze' }, // 3
+    { tipo: 'ponto', valor: 3 },           // 4
+    { tipo: 'moldura', key: 'prata', nome: 'Prata' }, // 5
+    { tipo: 'ponto', valor: 4 },           // 6
+    { tipo: 'balao', key: 'prata', nome: 'Chat Prata' }, // 7
+    { tipo: 'ponto', valor: 5 },           // 8
+    { tipo: 'caixa', valor: 0 },           // 9 (Caixa Misteriosa)
+    { tipo: 'ponto', valor: 6 },           // 10
+    { tipo: 'moldura', key: 'ouro', nome: 'Ouro' }, // 11
+    { tipo: 'ponto', valor: 7 },           // 12
+    { tipo: 'balao', key: 'ouro', nome: 'Chat Ouro' }, // 13
+    { tipo: 'ponto', valor: 8 },           // 14
+    { tipo: 'moldura', key: 'diamante', nome: 'Diamante' }, // 15
+    { tipo: 'ponto', valor: 9 },           // 16
+    { tipo: 'balao', key: 'diamante', nome: 'Chat Diamante' }, // 17
+    { tipo: 'ponto', valor: 10 },          // 18
+    { tipo: 'ponto', valor: 4 }            // 19
+];
+
+// Configuração dos Planos PRO (Para saber quantos giros o usuário tem)
+const LIMITES_GIROS = { 
+    'tier1': 2, 
+    'tier2': 3, 
+    'tier3': 4, 
+    'tier4': 5 
+};
+
+// Rota da Roleta Segura
+app.post('/api/girar-roleta', async (req, res) => {
+    const { uid } = req.body;
+
+    if (!uid) return res.status(400).json({ success: false, message: "UID obrigatório." });
+
+    try {
+        const userRef = db.collection('usuarios').doc(uid);
+        
+        // Usa transação para garantir que não haja giros simultâneos fraudulentos
+        const result = await db.runTransaction(async (t) => {
+            const userDoc = await t.get(userRef);
+            if (!userDoc.exists) throw new Error("Usuário não encontrado.");
+            
+            const perfil = userDoc.data();
+            const hoje = new Date().toDateString();
+
+            // 1. Verifica Limites de Giros
+            let girosTotais = 1; // Padrão (Gratuito)
+            
+            // Verifica se é PRO ativo e define limite
+            if (perfil.proAtivo && perfil.proExpirationDate) {
+                const expiracao = perfil.proExpirationDate.toDate();
+                if (expiracao > new Date()) {
+                    if (perfil.proTier && LIMITES_GIROS[perfil.proTier]) {
+                        girosTotais = LIMITES_GIROS[perfil.proTier];
+                    }
+                }
+            }
+
+            const isNovoDia = perfil.ultimoGiroRoleta !== hoje;
+            let girosRealizados = isNovoDia ? 0 : (perfil.girosRealizadosHoje || 0);
+
+            if (girosRealizados >= girosTotais) {
+                throw new Error("Sem giros disponíveis para hoje.");
+            }
+
+            // 2. Sorteio do Prêmio (RNG no Servidor)
+            // Dica de Segurança: Aqui você pode manipular as probabilidades se quiser que Diamante seja mais raro.
+            // Por enquanto, mantive aleatório uniforme (1/20) para simplificar.
+            const targetIndex = Math.floor(Math.random() * 20);
+            const premioGanho = ARRAY_PREMIOS_SERVER[targetIndex];
+
+            // 3. Prepara Updates
+            let updates = { 
+                ultimoGiroRoleta: hoje,
+                girosRealizadosHoje: isNovoDia ? 1 : admin.firestore.FieldValue.increment(1)
+            };
+            
+            let msgRetorno = "";
+            let tipoPr = "";
+
+            // Lógica de Entrega dos Prêmios
+            if (premioGanho.tipo === 'ponto') {
+                updates.pontosFidelidade = admin.firestore.FieldValue.increment(premioGanho.valor);
+                msgRetorno = `Você ganhou ${premioGanho.valor} pontos de fidelidade!`;
+                tipoPr = "ponto";
+            } 
+            else if (premioGanho.tipo === 'moldura' || premioGanho.tipo === 'balao') {
+                const tipoItem = premioGanho.tipo === 'moldura' ? 'Moldura' : 'Estilo de Chat';
+                const chaveObjeto = premioGanho.tipo === 'moldura' ? `premiosTemporarios.moldura_${premioGanho.key}` : `premiosTemporarios.balao_${premioGanho.key}`;
+                
+                // Lógica de Acumular Tempo
+                let baseDate = new Date();
+                // Verifica data atual no banco
+                const mapaPremios = perfil.premiosTemporarios || {};
+                const chaveSimples = premioGanho.tipo === 'moldura' ? `moldura_${premioGanho.key}` : `balao_${premioGanho.key}`;
+                
+                if (mapaPremios[chaveSimples]) {
+                    const existingDate = mapaPremios[chaveSimples].toDate();
+                    if (existingDate > new Date()) {
+                        baseDate = existingDate; // Acumula a partir da data futura
+                    }
+                }
+
+                baseDate.setHours(baseDate.getHours() + 24); // +24 Horas
+                updates[chaveObjeto] = admin.firestore.Timestamp.fromDate(baseDate);
+                
+                msgRetorno = `Sorte Grande! Você ganhou **${tipoItem} ${premioGanho.nome}** por +24 horas! (Acumulado)`;
+                tipoPr = "item";
+            } 
+            else if (premioGanho.tipo === 'caixa') {
+                // Lógica da Caixa Misteriosa
+                if (perfil.tipo !== 'cliente') {
+                    // Profissional: Ganha Boost
+                    let baseDate = new Date();
+                    if (perfil.boostExpiracao && perfil.boostExpiracao.toDate() > new Date()) {
+                        baseDate = perfil.boostExpiracao.toDate();
+                    }
+                    baseDate.setHours(baseDate.getHours() + 24);
+                    
+                    updates.boostExpiracao = admin.firestore.Timestamp.fromDate(baseDate);
+                    updates.ultimoBoostComprado = admin.firestore.FieldValue.serverTimestamp();
+                    msgRetorno = "Você ganhou +24 horas de Perfil Turbinado (Acumulado)!";
+                } else {
+                    // Cliente: Ganha VIP
+                    let baseDate = new Date();
+                    if (perfil.vip && perfil.vipExpirationDate && perfil.vipExpirationDate.toDate() > new Date()) {
+                        baseDate = perfil.vipExpirationDate.toDate();
+                    }
+                    baseDate.setDate(baseDate.getDate() + 5); // +5 Dias
+                    
+                    updates.vip = true;
+                    updates.vipExpirationDate = admin.firestore.Timestamp.fromDate(baseDate);
+                    msgRetorno = "Incrível! Você ganhou +5 Dias de VIP Grátis (Acumulado)!";
+                }
+                tipoPr = "caixa";
+            }
+
+            // Aplica Updates
+            t.update(userRef, updates);
+
+            return { targetIndex, msgRetorno, tipoPr };
+        });
+
+        res.status(200).json({ success: true, ...result });
+
+    } catch (error) {
+        console.error("Erro na roleta:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+// ==================================================================
+// === FIM: LÓGICA SEGURA DA ROLETA ===
+// ==================================================================
+
 // --- ROTAS DE CRON JOB ---
 
 // Rota para postar o código diário no blog
