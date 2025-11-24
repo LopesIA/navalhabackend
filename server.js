@@ -114,10 +114,10 @@ async function sendBotMessage() {
     }
 }
 
-// Inicia o bot para enviar mensagem a cada 5 minutos (300000 ms)
+// Inicia o bot para enviar mensagem a cada 30 minutos (1800000 ms)
 // Apenas em ambiente de produção (RENDER) para não rodar localmente
 if (process.env.NODE_ENV === 'production' || process.env.PORT) { // Verifica se está no Render
-    setInterval(sendBotMessage, 300000); 
+    setInterval(sendBotMessage, 1800000); 
     console.log("[BOT] Bot de mensagens ativado. Enviando a cada 5 minutos.");
 } else {
     console.log("[BOT] Bot de mensagens desativado em ambiente local.");
