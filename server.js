@@ -132,6 +132,7 @@ if (process.env.NODE_ENV === 'production' || process.env.PORT) { // Verifica se 
 const allowedOrigins = [
     'https://navalha-de-ouro-v11.web.app',
     'https://novaversao.site',
+    'https://www.novaversao.site',
     'http://localhost:3000' // Para desenvolvimento
 ];
 
