@@ -888,90 +888,102 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-app.get('/cron/enviar-lembretes', async (req, res) => {
+// --- CRON JOB MESTRE DE NOTIFICAÇÕES (1h, 10min, Retenção) ---
+app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
+    if (key !== process.env.CRON_SECRET_KEY) return res.status(401).send('Unauthorized');
 
-    // 1. Validação da Chave Secreta
-    if (key !== process.env.CRON_SECRET_KEY) {
-        console.warn(`[CRON Lembretes] Tentativa de acesso não autorizado.`);
-        return res.status(401).send('ERRO: Chave inválida.');
-    }
-
-    console.log("[CRON Lembretes] Iniciando verificação de lembretes...");
+    console.log("[CRON] Iniciando ciclo de notificações completo...");
+    const agora = new Date();
+    const batch = db.batch();
+    let contador = 0;
 
     try {
-        const agora = new Date();
-        // Define o período da janela de lembrete (ex: entre 2 e 3 horas a partir de agora)
-        const inicioJanela = new Date(agora.getTime() + 2 * 60 * 60 * 1000); // 2 horas a partir de agora
-        const fimJanela = new Date(agora.getTime() + 3 * 60 * 60 * 1000);   // 3 horas a partir de agora
-
-        // Converte as datas para o formato de string H:mm (ex: "14:30")
-        // IMPORTANTE: Seu banco de dados salva o horário como string (ex: "14:30").
-        // Esta lógica só funciona para agendamentos no MESMO DIA.
-        const horaInicio = `${inicioJanela.getHours()}:${inicioJanela.getMinutes().toString().padStart(2, '0')}`;
-        const horaFim = `${fimJanela.getHours()}:${fimJanela.getMinutes().toString().padStart(2, '0')}`;
+        // === 1. LEMBRETE DE 1 HORA ANTES ===
+        // Janela: Entre 55min e 65min a partir de agora
+        const janela1hInicio = new Date(agora.getTime() + 55 * 60 * 1000);
+        const janela1hFim = new Date(agora.getTime() + 65 * 60 * 1000);
         
-        // Busca agendamentos 'confirmados' (que no seu código é 'conclusão pendente'), 
-        // que ainda não tiveram lembrete enviado,
-        // e cujo horário (string) esteja dentro da nossa janela.
-        const query = db.collection('agendamentos')
-            .where('status', '==', 'conclusão pendente') // Você usa 'conclusão pendente' após aprovar
-            .where('lembreteEnviado', '==', false)
-            .where('horario', '>=', horaInicio)
-            .where('horario', '<=', horaFim);
+        // Converte para string HH:MM (ex: "14:30") - Atenção: Isso assume agendamento no MESMO DIA
+        // Para produção robusta, recomenda-se salvar 'dataHoraCompleta' (Timestamp) no agendamento
+        // Aqui usaremos a lógica de string compatível com seu banco atual
+        const hora1hInicio = `${String(janela1hInicio.getHours()).padStart(2,'0')}:${String(janela1hInicio.getMinutes()).padStart(2,'0')}`;
+        const hora1hFim = `${String(janela1hFim.getHours()).padStart(2,'0')}:${String(janela1hFim.getMinutes()).padStart(2,'0')}`;
 
-        const snapshot = await query.get();
+        const snap1h = await db.collection('agendamentos')
+            .where('status', 'in', ['confirmado', 'conclusão pendente'])
+            .where('lembrete1hEnviado', '==', false)
+            .where('horario', '>=', hora1hInicio)
+            .where('horario', '<=', hora1hFim)
+            .get();
 
-        if (snapshot.empty) {
-            console.log(`[CRON Lembretes] Nenhum agendamento encontrado entre ${horaInicio} e ${horaFim}.`);
-            return res.status(200).send('OK: Nenhum lembrete para enviar.');
-        }
-
-        console.log(`[CRON Lembretes] ${snapshot.size} lembretes para enviar.`);
-        let enviados = 0;
-        const batch = db.batch();
-
-        for (const doc of snapshot.docs) {
+        snap1h.forEach(doc => {
             const ag = doc.data();
-            const agendamentoId = doc.id;
-
-            // Evita enviar lembrete se o agendamento for de um dia anterior (caso a query pegue lixo)
-            if (ag.ts.toDate() < new Date(agora.getTime() - 24 * 60 * 60 * 1000)) {
-                continue; // Pula agendamentos muito antigos
+            // Verifica se é hoje (filtro grosseiro, ideal é timestamp)
+            if (ag.ts.toDate() > new Date(agora.getTime() - 24*60*60*1000)) {
+                sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é às ${ag.horario}.`, { link: '#historico' });
+                batch.update(doc.ref, { lembrete1hEnviado: true });
+                contador++;
             }
+        });
 
-            // Prepara para marcar como enviado
-            const agendamentoRef = db.collection('agendamentos').doc(agendamentoId);
-            batch.update(agendamentoRef, { lembreteEnviado: true });
+        // === 2. LEMBRETE DE 10 MINUTOS ANTES (COM AVISO DE CANCELAMENTO) ===
+        const janela10Inicio = new Date(agora.getTime() + 5 * 60 * 1000);
+        const janela10Fim = new Date(agora.getTime() + 15 * 60 * 1000);
+        const hora10Inicio = `${String(janela10Inicio.getHours()).padStart(2,'0')}:${String(janela10Inicio.getMinutes()).padStart(2,'0')}`;
+        const hora10Fim = `${String(janela10Fim.getHours()).padStart(2,'0')}:${String(janela10Fim.getMinutes()).padStart(2,'0')}`;
 
-            // Envia notificação para o Cliente
-            // (Usando sua função sendNotification que já existe no server.js)
-            sendNotification(
-                ag.clienteUid,
-                '🔔 Lembrete de Agendamento!',
-                `Seu horário com ${ag.barbeiroNome} (${ag.servico}) é logo mais, às ${ag.horario}! Não se atrase.`,
-                { link: '#historico' }
-            );
+        const snap10min = await db.collection('agendamentos')
+            .where('status', 'in', ['confirmado', 'conclusão pendente'])
+            .where('lembrete10minEnviado', '==', false)
+            .where('horario', '>=', hora10Inicio)
+            .where('horario', '<=', hora10Fim)
+            .get();
 
-            // Envia notificação para o Profissional
-            sendNotification(
-                ag.barbeiroUid,
-                '🔔 Lembrete de Cliente!',
-                `Seu horário com ${ag.clienteNome} (${ag.servico}) é às ${ag.horario}. Prepare-se para atendê-lo(a).`,
-                { link: '#agendamentos' }
-            );
-            
-            enviados++;
+        snap10min.forEach(doc => {
+            const ag = doc.data();
+            if (ag.ts.toDate() > new Date(agora.getTime() - 24*60*60*1000)) {
+                sendNotification(
+                    ag.clienteUid, 
+                    '🚀 É daqui a pouco!', 
+                    `Seu corte é em 10 minutos! Se precisar cancelar, faça isso AGORA no app para evitar penalidades e liberar a agenda.`, 
+                    { link: '#historico' }
+                );
+                batch.update(doc.ref, { lembrete10minEnviado: true });
+                contador++;
+            }
+        });
+
+        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) ===
+        // Envia apenas 1 vez por dia (pode usar um cron job separado que roda as 10am)
+        if (agora.getHours() === 10) { // Roda apenas se for a execução das 10h (aprox)
+            const vinteCincoDiasAtras = new Date(agora.getTime() - 25 * 24 * 60 * 60 * 1000);
+            const vinteSeisDiasAtras = new Date(agora.getTime() - 26 * 24 * 60 * 60 * 1000);
+
+            const usuariosSumidos = await db.collection('usuarios')
+                .where('tipo', '==', 'cliente')
+                .where('ultimoAgendamento', '>=', vinteSeisDiasAtras)
+                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
+                .get();
+
+            usuariosSumidos.forEach(doc => {
+                const u = doc.data();
+                sendNotification(
+                    doc.id, 
+                    '✂️ Tá na hora do talento?', 
+                    `Faz quase um mês que você não aparece! Que tal agendar um corte hoje?`, 
+                    { link: '#barbeiros' }
+                );
+                contador++;
+            });
         }
 
-        await batch.commit(); // Marca todos como enviados no DB
-        
-        console.log(`[CRON Lembretes] ${enviados} lembretes enviados com sucesso.`);
-        res.status(200).send(`OK: ${enviados} lembretes enviados.`);
+        await batch.commit();
+        res.status(200).send(`OK: ${contador} notificações processadas.`);
 
     } catch (error) {
-        console.error('[CRON Lembretes] Erro ao executar tarefa:', error);
-        res.status(500).send('ERRO: Falha ao executar a tarefa de lembretes.');
+        console.error(error);
+        res.status(500).send("Erro no processamento.");
     }
 });
 
