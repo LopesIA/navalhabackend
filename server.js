@@ -179,6 +179,28 @@ async function sendNotification(uid, title, body, data = {}) {
             notification: { title, body },
             data, // Inclui o link aqui
             tokens: tokens,
+            
+            // --- CONFIGURAÇÃO PARA ALERTA MÁXIMO (ANDROID) ---
+            android: {
+                priority: 'high', // Alta prioridade para acordar a CPU
+                notification: {
+                    channelId: 'high_importance_channel', // Canal que criaremos no Front
+                    priority: 'max', // Faz aparecer na frente da tela (Heads-up)
+                    defaultSound: true,
+                    visibility: 'public',
+                    icon: 'stock_ticker_update' // Ou o ícone que você usa
+                }
+            },
+            
+            // --- CONFIGURAÇÃO PARA IPHONE (iOS) ---
+            apns: {
+                payload: {
+                    aps: {
+                        sound: 'default',
+                        contentAvailable: true // Importante para acordar o app em background
+                    }
+                }
+            }
         };
 
         const response = await admin.messaging().sendEachForMulticast(message);
