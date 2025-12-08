@@ -340,26 +340,32 @@ const isAdmin = async (req, res, next) => {
 };
 
 // Rota para atualizar dados do usuário no Firestore
- app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
-    // Não desestruture 'adminUid' aqui para não enviar ao Firestore
+app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
     const { targetUid, updates } = req.body;
     if (!targetUid || !updates) {
-        return res.status(400).json({ message: "ID do usuário e dados para atualização são obrigatórios." });
+        return res.status(400).json({ message: "ID e dados obrigatórios." });
     }
     try {
-        // Adiciona o timestamp para forçar o reload no cliente
         const finalUpdates = {
             ...updates,
-            forceReloadTimestamp: admin.firestore.FieldValue.serverTimestamp() // <-- ADICIONADO AQUI
+            forceReloadTimestamp: admin.firestore.FieldValue.serverTimestamp()
         };
 
         await db.collection('usuarios').doc(targetUid).update(finalUpdates);
-        res.status(200).json({ message: "Dados do usuário atualizados no Firestore com sucesso." });
+
+        // --- CÓDIGO NOVO AQUI: DETECTA SE VIROU TIER 4 ---
+        if (updates.proTier === 'tier4' && updates.proAtivo === true) {
+            console.log(`[ADMIN-SYNC] Admin definiu usuário ${targetUid} como Tier 4. Sincronizando...`);
+            sincronizarPortfolioEmAlta(targetUid);
+        }
+        // ------------------------------------------------
+
+        res.status(200).json({ message: "Dados atualizados com sucesso." });
     } catch (error) {
-        console.error("Erro ao atualizar dados do usuário no Firestore:", error);
-        res.status(500).json({ message: "Falha ao atualizar dados.", error: error.message });
+        console.error("Erro update admin:", error);
+        res.status(500).json({ message: "Falha ao atualizar.", error: error.message });
     }
- });
+});
 
 // Rota para definir uma nova senha para o usuário
  app.post('/admin/reset-user-password', isAdmin, async (req, res) => {
@@ -412,9 +418,9 @@ async function activateBenefitInFirestore(uid, sku) {
     const userRef = db.collection('usuarios').doc(uid);
     const expiracao = new Date();
     let updates = {};
+    let isTier4Activation = false; // Flag para controlar a sincronização
 
-    // --- INÍCIO DA MUDANÇA: Adicionando SKUs de depósito ---
-    // Procura por SKUs no formato 'deposito_VALOR' (ex: deposito_10, deposito_50)
+    // Lógica de Depósito
     const depositoMatch = sku.match(/^deposito_(\d+)$/); 
     
     if (depositoMatch && depositoMatch[1]) {
@@ -422,17 +428,13 @@ async function activateBenefitInFirestore(uid, sku) {
         if (isNaN(valorDeposito) || valorDeposito <= 0) {
             throw new Error(`SKU de depósito inválido: ${sku}`);
         }
-        
         console.log(`Processando depósito de R$ ${valorDeposito} para ${uid}`);
         updates = {
             saldo: admin.firestore.FieldValue.increment(valorDeposito)
-            // Você pode adicionar pontos de fidelidade por depósito aqui, se quiser:
-            // pontosFidelidade: admin.firestore.FieldValue.increment(pontosGanhos) 
         };
-    // --- FIM DA MUDANÇA ---
 
     } else {
-        // Lógica existente para VIP, PRO, etc.
+        // Lógica de Planos e Boost
         switch (sku) {
             case 'adesao_vip_6_meses':
                 expiracao.setDate(expiracao.getDate() + 180);
@@ -451,21 +453,36 @@ async function activateBenefitInFirestore(uid, sku) {
             case 'pro_tier1':
             case 'pro_tier2':
             case 'pro_tier3':
+            case 'pro_tier4': // GARANTINDO QUE TIER 4 ESTÁ AQUI
                 expiracao.setDate(expiracao.getDate() + 30);
-                const tier = sku.split('_')[1]; // extrai 'tier1', 'tier2', etc.
+                const tier = sku.split('_')[1]; // extrai 'tier1', 'tier4', etc.
+                
                 updates = {
                     proAtivo: true,
                     proTier: tier,
                     proExpirationDate: admin.firestore.Timestamp.fromDate(expiracao)
                 };
+
+                // Se for Tier 4, marca a flag para sincronizar depois
+                if (tier === 'tier4') {
+                    isTier4Activation = true;
+                }
                 break;
             default:
                 throw new Error(`SKU desconhecido: ${sku}`);
         }
     }
 
+    // 1. Atualiza o usuário no banco
     await userRef.update(updates);
     console.log(`Benefício ${sku} ativado para o usuário ${uid}.`);
+
+    // 2. SE FOR TIER 4, EXECUTA A SINCRONIZAÇÃO AUTOMÁTICA
+    if (isTier4Activation) {
+        console.log(`[AUTO-SYNC] Usuário ${uid} virou Tier 4. Iniciando sincronização...`);
+        // Não usamos await aqui para não travar a resposta da API de pagamento (roda em segundo plano)
+        sincronizarPortfolioEmAlta(uid);
+    }
 }
 
 // Rota para validar a compra da Google Play
@@ -991,6 +1008,67 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 app.get('/', (req, res) => {
     res.send('Backend VersãoPro está no ar!');
 });
+
+// --- FUNÇÃO AUXILIAR: Sincronizar Portfólio com Em Alta (Server-Side) ---
+async function sincronizarPortfolioEmAlta(uid) {
+    try {
+        const userDoc = await db.collection('usuarios').doc(uid).get();
+        if (!userDoc.exists) return;
+
+        const u = userDoc.data();
+        
+        // Verifica se realmente é Tier 4 (Segurança)
+        // (Ou se você quiser forçar mesmo sem ser, remova este if)
+        if (!u.proAtivo || u.proTier !== 'tier4') {
+            console.log(`[SYNC] Usuário ${uid} não é Tier 4. Pulando sincronização.`);
+            return;
+        }
+
+        const portfolio = u.portfolio || [];
+        if (portfolio.length === 0) return;
+
+        console.log(`[SYNC] Sincronizando ${portfolio.length} fotos de ${u.nome} para o Em Alta...`);
+
+        const batch = db.batch();
+        let opsCount = 0;
+
+        for (const imgUrl of portfolio) {
+            // Ignora imagens de Antes/Depois (formato especial) se houver
+            if (typeof imgUrl === 'string' && imgUrl.startsWith("BA|")) continue;
+
+            // Verifica duplicidade para não criar repetido
+            const checkSnap = await db.collection('batalha_likes')
+                .where('imgUrl', '==', imgUrl)
+                .limit(1)
+                .get();
+
+            if (checkSnap.empty) {
+                const novoDocRef = db.collection('batalha_likes').doc();
+                batch.set(novoDocRef, {
+                    imgUrl: imgUrl,
+                    ownerUid: uid,
+                    ownerName: u.nome,
+                    ownerTier: 'tier4',
+                    count: 0,
+                    likedBy: [],
+                    ts: admin.firestore.FieldValue.serverTimestamp(),
+                    origem: 'automatico_server'
+                });
+                opsCount++;
+            }
+        }
+
+        if (opsCount > 0) {
+            await batch.commit();
+            console.log(`[SYNC] Sucesso! ${opsCount} novas fotos adicionadas ao Em Alta.`);
+        } else {
+            console.log(`[SYNC] Nenhuma foto nova para adicionar (todas já existiam ou portfólio vazio).`);
+        }
+
+    } catch (error) {
+        console.error("[SYNC] Erro ao sincronizar Em Alta:", error);
+    }
+}
 
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
