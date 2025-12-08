@@ -162,42 +162,33 @@ app.use(express.json());
  * @returns {object} - Um objeto indicando o sucesso ou falha da operação.
  */
 async function sendNotification(uid, title, body, data = {}) {
-    if (!uid) {
-        return { success: false, message: "UID não fornecido." };
-    }
+    if (!uid) return { success: false, message: "UID não fornecido." };
+    
     try {
         const userDoc = await db.collection('usuarios').doc(uid).get();
-        if (!userDoc.exists) {
-            return { success: false, message: `Usuário ${uid} não encontrado.` };
-        }
+        if (!userDoc.exists) return { success: false, message: `Usuário ${uid} não encontrado.` };
+        
         const tokens = userDoc.data().fcmTokens;
-        if (!tokens || tokens.length === 0) {
-            return { success: false, message: `Usuário ${uid} não possui tokens.` };
-        }
+        if (!tokens || tokens.length === 0) return { success: false, message: `Usuário ${uid} não possui tokens.` };
 
+        // --- TRUQUE DO ALARME: ENVIAR COMO "DATA MESSAGE" ---
+        // Não usamos o campo 'notification' aqui para que o Android não exiba a padrão.
+        // O Service Worker vai pegar esses dados e criar a notificação personalizada.
         const message = {
-            notification: { title, body },
-            data, // Inclui o link aqui
-            tokens: tokens,
-            
-            // --- CONFIGURAÇÃO PARA ALERTA MÁXIMO (ANDROID) ---
-            android: {
-                priority: 'high', // Alta prioridade para acordar a CPU
-                notification: {
-                    channelId: 'high_importance_channel', // Canal que criaremos no Front
-                    priority: 'max', // Faz aparecer na frente da tela (Heads-up)
-                    defaultSound: true,
-                    visibility: 'public',
-                    icon: 'stock_ticker_update' // Ou o ícone que você usa
-                }
+            data: {
+                title: title,
+                body: body,
+                ...data, // Seus dados extras (link, action, etc)
+                forceAlarm: 'true' // Flag para o SW saber que deve tocar muito
             },
-            
-            // --- CONFIGURAÇÃO PARA IPHONE (iOS) ---
+            tokens: tokens,
+            android: {
+                priority: 'high', // Acorda a CPU
+            },
             apns: {
                 payload: {
                     aps: {
-                        sound: 'default',
-                        contentAvailable: true // Importante para acordar o app em background
+                        contentAvailable: true // Acorda o iOS
                     }
                 }
             }
@@ -205,7 +196,7 @@ async function sendNotification(uid, title, body, data = {}) {
 
         const response = await admin.messaging().sendEachForMulticast(message);
 
-        // Limpeza de tokens inválidos
+        // Limpeza de tokens (MANTIDA IGUAL)
         const tokensToRemove = [];
         response.responses.forEach((result, index) => {
             if (!result.success) {
@@ -223,6 +214,7 @@ async function sendNotification(uid, title, body, data = {}) {
         }
 
         return { success: true, response };
+
     } catch (error) {
         console.error(`Erro ao enviar notificação para ${uid}:`, error);
         return { success: false, message: error.message };
