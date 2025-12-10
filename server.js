@@ -1084,6 +1084,100 @@ async function sincronizarPortfolioEmAlta(uid) {
     }
 }
 
+// --- FUNÇÃO AUXILIAR: CALCULAR DISTÂNCIA (Haversine) ---
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  var R = 6371; // Raio da terra em km
+  var dLat = deg2rad(lat2-lat1);
+  var dLon = deg2rad(lon2-lon1); 
+  var a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  var d = R * c; // Distância em km
+  return d;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI/180)
+}
+
+// --- ROTA: DISPARAR SOS COM RAIO DE 3KM ---
+app.post('/api/disparar-sos', async (req, res) => {
+    const { latOrigem, lonOrigem, nomeProfissional, mensagem, desconto, uidProfissional } = req.body;
+
+    if (!latOrigem || !lonOrigem || !nomeProfissional) {
+        return res.status(400).json({ message: "Dados incompletos." });
+    }
+
+    try {
+        // 1. Busca todos os usuários clientes que têm token de notificação
+        // (Otimização: Em um app gigante, usaríamos GeoFire, mas para este caso o filtro em memória funciona bem)
+        const usersSnap = await db.collection('usuarios')
+            .where('tipo', '==', 'cliente')
+            .get();
+
+        if (usersSnap.empty) {
+            return res.status(200).json({ message: "Nenhum cliente encontrado.", count: 0 });
+        }
+
+        const tokensParaEnviar = [];
+        let countUsuariosProximos = 0;
+
+        usersSnap.forEach(doc => {
+            const u = doc.data();
+            
+            // Verifica se o usuário tem localização e tokens
+            if (u.latitude && u.longitude && u.fcmTokens && u.fcmTokens.length > 0) {
+                // Calcula distância
+                const distancia = getDistanceFromLatLonInKm(latOrigem, lonOrigem, u.latitude, u.longitude);
+                
+                // Se estiver dentro de 3km (e não for o próprio profissional, caso ele tenha conta de teste)
+                if (distancia <= 3 && doc.id !== uidProfissional) {
+                    tokensParaEnviar.push(...u.fcmTokens);
+                    countUsuariosProximos++;
+                }
+            }
+        });
+
+        // Remove duplicatas de tokens
+        const uniqueTokens = [...new Set(tokensParaEnviar)];
+
+        if (uniqueTokens.length === 0) {
+            return res.status(200).json({ message: "Nenhum cliente com notificação ativa no raio de 3km.", count: 0 });
+        }
+
+        // 2. Prepara a Mensagem Push
+        const message = {
+            notification: {
+                title: `🚨 SOS: ${desconto}% OFF!`,
+                body: `${nomeProfissional} liberou uma vaga agora! ${mensagem}`
+            },
+            data: {
+                link: '#barbeiros', // Ao clicar, abre a lista
+                forceAlarm: 'true'  // Toca o som de alerta personalizado
+            }
+        };
+
+        // 3. Envia em Lotes (Multicast)
+        const response = await admin.messaging().sendEachForMulticast({
+            ...message,
+            tokens: uniqueTokens
+        });
+
+        console.log(`[SOS] Enviado para ${uniqueTokens.length} dispositivos próximos.`);
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Alerta enviado para ${countUsuariosProximos} clientes próximos!`,
+            sendedCount: response.successCount 
+        });
+
+    } catch (error) {
+        console.error("Erro no SOS:", error);
+        res.status(500).json({ message: "Erro interno no servidor." });
+    }
+});
+
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
