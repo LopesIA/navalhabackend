@@ -514,7 +514,7 @@ app.post('/google-play/validate-purchase', async (req, res) => {
         });
         google.options({ auth });
         
-        const packageName = 'com.seupacote.app'; // <-- IMPORTANTE: SUBSTITUA PELO NOME DO SEU PACOTE
+        const packageName = 'com.kingagenda.site'; // <-- IMPORTANTE: SUBSTITUA PELO NOME DO SEU PACOTE
 
         // Verifica se o token já foi validado antes para evitar reativação
         const purchaseRecordRef = db.collection('google_play_purchases').doc(purchaseToken);
