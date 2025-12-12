@@ -1178,6 +1178,47 @@ app.post('/api/disparar-sos', async (req, res) => {
     }
 });
 
+// --- NOVO CRON: RESETAR AGENDA DIÁRIA (20:00) ---
+app.get('/cron/resetar-agendas-diarias', async (req, res) => {
+    const { key } = req.query;
+
+    // Verifica a chave de segurança (a mesma usada nos outros crons)
+    if (key !== process.env.CRON_SECRET_KEY) {
+        return res.status(401).send('ERRO: Chave inválida.');
+    }
+
+    try {
+        console.log("Iniciando reset das agendas diárias...");
+        
+        // Busca todos os usuários que usam agenda manual
+        const usuariosRef = db.collection('usuarios');
+        const snapshot = await usuariosRef.where('usaAgendaManual', '==', true).get();
+
+        if (snapshot.empty) {
+            return res.status(200).send('OK: Nenhuma agenda para resetar.');
+        }
+
+        const batch = db.batch();
+        let contador = 0;
+
+        snapshot.forEach(doc => {
+            // Zera a agenda (deixa o objeto vazio {})
+            // Assim o barbeiro tem que clicar nos horários no dia seguinte para abrir
+            batch.update(doc.ref, { agenda: {} });
+            contador++;
+        });
+
+        await batch.commit();
+
+        console.log(`Reset concluído! ${contador} agendas foram limpas.`);
+        res.status(200).send(`OK: ${contador} agendas resetadas.`);
+
+    } catch (error) {
+        console.error('Erro no CRON de reset de agenda:', error);
+        res.status(500).send('ERRO: Falha ao executar tarefa.');
+    }
+});
+
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
