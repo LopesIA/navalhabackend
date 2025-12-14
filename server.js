@@ -1181,49 +1181,58 @@ app.post('/api/disparar-sos', async (req, res) => {
     }
 });
 
-// server.js - SUBSTITUA A ROTA /cron/reset-agenda POR ESTA:
-
+// --- CRON JOB: RESETAR AGENDA DIÁRIA (ATIVAR TODOS OS HORÁRIOS) ---
+// Rota para resetar os horários de quem usa Agenda Programada
 app.get('/cron/reset-agenda', async (req, res) => {
-    const { key } = req.query;
+    // 1. VERIFICAÇÃO DE SEGURANÇA (Chave Secreta)
+    const chaveRecebida = req.query.key;
+    const CHAVE_SECRETA = 'Ja997640401'; // Sua chave definida
 
-    // Verifica a chave de segurança que você me passou
-    if (key !== process.env.CRON_SECRET_KEY) { // Certifique-se que sua .env tem CRON_SECRET_KEY=Ja997640401
-        return res.status(401).send('ERRO: Chave inválida.');
+    if (chaveRecebida !== CHAVE_SECRETA) {
+        return res.status(403).send('ACESSO NEGADO: Chave de segurança inválida.');
     }
 
+    console.log("CRON INICIADO: Resetando agendas programadas...");
+
     try {
-        console.log("Iniciando reset das agendas diárias...");
-        
-        // Busca todos os usuários que estão com agenda manual ativada ou modificada
+        // 2. BUSCA PROFISSIONAIS COM AGENDA MANUAL ATIVA
+        // Só mexe em quem ativou a opção "usaAgendaManual"
         const usuariosRef = db.collection('usuarios');
         const snapshot = await usuariosRef.where('usaAgendaManual', '==', true).get();
 
         if (snapshot.empty) {
-            return res.status(200).send('OK: Nenhuma agenda manual para resetar.');
+            console.log("Nenhuma agenda manual encontrada para resetar.");
+            return res.status(200).send('OK: Nenhuma agenda precisava de reset.');
         }
 
+        // 3. EXECUTA O RESET EM LOTE (BATCH)
         const batch = db.batch();
         let contador = 0;
 
         snapshot.forEach(doc => {
-            // O SEGREDO: Ao invés de zerar (agenda: {}), nós desligamos o modo manual.
-            // Isso faz o app voltar a gerar os horários automaticamente (8h às 20h) no dia seguinte.
-            // O horário de almoço será filtrado visualmente no Frontend, então não precisamos nos preocupar aqui.
+            const dados = doc.data();
+            
+            // LÓGICA DE RESET:
+            // Se "agenda" for um objeto onde as chaves são horários (ex: "09:00": false),
+            // para liberar tudo, basta definir "agenda" como um objeto vazio {}.
+            // O seu front-end entende {} como "todos os horários disponíveis" (padrão).
+            // OU, se quiser forçar explicitamente, teríamos que criar o mapa.
+            // Pelo seu código anterior, limpar o objeto é o mais eficiente.
+            
             batch.update(doc.ref, { 
-                usaAgendaManual: false,
-                agenda: {} 
+                agenda: {}  // Reseta para "Tudo Livre"
             });
             contador++;
         });
 
         await batch.commit();
 
-        console.log(`Reset concluído! ${contador} profissionais voltaram para o modo automático.`);
-        res.status(200).send(`OK: ${contador} agendas resetadas para automático.`);
+        console.log(`SUCESSO: ${contador} agendas foram resetadas para 'Tudo Livre'.`);
+        res.status(200).send(`SUCESSO: ${contador} profissionais tiveram seus horários liberados.`);
 
     } catch (error) {
-        console.error('Erro no CRON de reset de agenda:', error);
-        res.status(500).send('Erro interno: ' + error.message);
+        console.error('ERRO FATAL NO CRON:', error);
+        res.status(500).send('ERRO INTERNO: ' + error.message);
     }
 });
 
