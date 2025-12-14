@@ -1190,20 +1190,16 @@ app.get('/cron/reset-agenda', async (req, res) => {
         return res.status(403).send('ACESSO NEGADO.');
     }
 
-    console.log("CRON INICIADO: Ativando todos os horários...");
+    const timeToMin = (t) => {
+        if (!t) return null;
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+    };
 
     try {
-        // 1. GERA A LISTA DE HORÁRIOS COMPLETA (07:00 às 20:00)
-        const agendaCheia = {};
-        for (let i = 7 * 60; i <= 20 * 60; i += 30) { 
-            const horas = Math.floor(i / 60);
-            const minutos = i % 60;
-            const horario = `${horas}:${minutos.toString().padStart(2, '0')}`;
-            // Marca como TRUE (Ativo/Disponível)
-            agendaCheia[horario] = true;
-        }
-
-        // 2. BUSCA QUEM TEM AGENDA MANUAL ATIVA
+        // Não precisamos mais gerar uma agenda "cheia" universal
+        
+        // 1. BUSCA QUEM TEM AGENDA MANUAL ATIVA (E PEGA OS DADOS PARA O FILTRO)
         const usuariosRef = db.collection('usuarios');
         const snapshot = await usuariosRef.where('usaAgendaManual', '==', true).get();
 
@@ -1211,26 +1207,60 @@ app.get('/cron/reset-agenda', async (req, res) => {
             return res.status(200).send('OK: Ninguém usa agenda manual no momento.');
         }
 
-        // 3. ATUALIZA TODO MUNDO
+        // 2. ATUALIZA PROFISSIONAL POR PROFISSIONAL, APLICANDO OS FILTROS DE EXPEDIENTE
         const batch = db.batch();
         let contador = 0;
 
         snapshot.forEach(doc => {
-            // Mantém usaAgendaManual = true, mas enche a agenda de horários ativos
+            const dadosProf = doc.data();
+            const agendaPersonalizada = {}; // VAMOS CONSTRUIR A AGENDA DESTE PROFISSIONAL AQUI
+
+            // a. PEGA OS LIMITES DO PERFIL (com padrões seguros)
+            // 07:00 = 420 min; 20:30 = 1230 min
+            const inicioExp = timeToMin(dadosProf.horarioInicio) || 420;
+            const fimExp = timeToMin(dadosProf.horarioFim) || 1230;
+
+            let almocoIn = timeToMin(dadosProf.almocoInicio);
+            let almocoOut = timeToMin(dadosProf.almocoFim);
+            if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
+
+            // b. GERA A AGENDA COM FILTRO (Loop de 07:00 a 20:30, o limite máximo)
+            for (let i = 7 * 60; i <= 20 * 60 + 30; i += 30) {
+                const horas = Math.floor(i / 60);
+                const minutos = i % 60;
+                const horario = `${horas}:${minutos.toString().padStart(2, '0')}`;
+                
+                let status = true; // Por padrão, está livre
+
+                // Regra 1: Fora do Expediente? Bloqueia.
+                if (i < inicioExp || i >= fimExp) {
+                    status = false;
+                }
+
+                // Regra 2: No Almoço? Bloqueia.
+                if (almocoIn !== -1 && i >= almocoIn && i < almocoOut) {
+                    status = false;
+                }
+                
+                // Atribui o status (true=livre, false=bloqueado)
+                agendaPersonalizada[horario] = status;
+            }
+
+            // c. ATUALIZA NO BATCH
             batch.update(doc.ref, { 
-                agenda: agendaCheia 
+                agenda: agendaPersonalizada 
             });
             contador++;
         });
 
         await batch.commit();
 
-        console.log(`SUCESSO: ${contador} agendas foram preenchidas com todos os horários.`);
-        res.status(200).send(`SUCESSO: ${contador} profissionais estão com a agenda cheia de horários livres.`);
+        console.log(`SUCESSO: ${contador} agendas foram atualizadas com filtros de Expediente/Almoço.`);
+        res.status(200).send(`SUCESSO: ${contador} profissionais estão com a agenda programada atualizada.`);
 
     } catch (error) {
         console.error('ERRO NO CRON:', error);
-        res.status(500).send('ERRO: ' + error.message);
+        res.status(500).send('ERRO: Falha ao ativar horários.');
     }
 });
 
