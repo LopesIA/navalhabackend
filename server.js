@@ -245,6 +245,61 @@ app.post('/enviar-notificacao', async (req, res) => {
     }
 });
 
+const { google } = require('googleapis');
+
+// --- CONFIGURAÇÃO DA GOOGLE PLAY API ---
+// Você precisará baixar a chave JSON do seu Google Cloud Service Account
+const authPlayStore = new google.auth.GoogleAuth({
+  keyFile: './sua-chave-google-cloud.json', // Caminho para sua chave real
+  scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+});
+const playDeveloperApi = google.androidpublisher({ version: 'v3', auth: authPlayStore });
+
+app.post('/api/confirmar-compra-real', async (req, res) => {
+    const { uid, skuId, purchaseToken } = req.body;
+    const PACKAGE_NAME = "com.seuapp.barberconnect"; // O ID do seu app na Play Store
+
+    if (!uid || !skuId || !purchaseToken) {
+        return res.status(400).json({ success: false, message: "Dados incompletos." });
+    }
+
+    try {
+        // 1. VALIDAR DIRETAMENTE NO GOOGLE
+        const googleRes = await playDeveloperApi.purchases.products.get({
+            packageName: PACKAGE_NAME,
+            productId: skuId,
+            token: purchaseToken
+        });
+
+        // 2. VERIFICAR SE A COMPRA FOI REALMENTE CONCLUÍDA (purchaseState 0 = Comprado)
+        if (googleRes.data.purchaseState === 0) {
+            
+            // Tabela de valores (mesma lógica)
+            const tabelaPrecos = { 'diamante_1': 1, 'diamante_10': 10, 'diamante_100': 100 };
+            const qtdDiamantes = tabelaPrecos[skuId] || 0;
+
+            const userRef = db.collection('usuarios').doc(uid);
+            
+            await db.runTransaction(async (t) => {
+                const doc = await t.get(userRef);
+                const saldoAtual = doc.data().saldoDigital || 0;
+                t.update(userRef, { 
+                    saldoDigital: saldoAtual + qtdDiamantes,
+                    ultimaCompraToken: purchaseToken // Salva o token para evitar que usem o mesmo 2x
+                });
+            });
+
+            return res.json({ success: true, message: "Compra validada e diamantes entregues!" });
+        } else {
+            return res.status(400).json({ success: false, message: "Compra não aprovada pelo Google." });
+        }
+
+    } catch (error) {
+        console.error("ERRO NA VALIDAÇÃO REAL:", error);
+        res.status(500).json({ success: false, message: "Erro ao validar com o Google." });
+    }
+});
+
 // Rota para notificação em massa
 app.post('/enviar-notificacao-massa', async (req, res) => {
     const { title, body, adminUid } = req.body;
