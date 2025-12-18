@@ -222,16 +222,26 @@ async function sendNotification(uid, title, body, data = {}) {
 }
 
 
-// --- ROTAS DA API ---
-
-// Rota para notificação individual (usada em todo o app)
+// Rota para notificação individual (CORRIGIDA PARA NÃO TRAVAR O APP)
 app.post('/enviar-notificacao', async (req, res) => {
     const { uid, title, body, data } = req.body;
+    
+    // Tenta enviar
     const result = await sendNotification(uid, title, body, data);
+
     if (result.success) {
-        res.status(200).json({ message: "Notificação enviada." });
+        res.status(200).json({ success: true, message: "Notificação enviada." });
     } else {
-        res.status(500).json({ message: "Falha ao enviar notificação.", error: result.message });
+        // MUDANÇA IMPORTANTE:
+        // Se falhar (ex: usuário sem token), retornamos 200 (OK) mas com aviso no JSON.
+        // Isso impede que o Frontend ache que o servidor caiu e fique tentando de novo (loop infinito).
+        console.warn(`[NOTIFICAÇÃO] Falha controlada para ${uid}: ${result.message}`);
+        
+        res.status(200).json({ 
+            success: false, 
+            message: "Falha ao enviar notificação (provavelmente sem token).", 
+            error: result.message 
+        });
     }
 });
 
