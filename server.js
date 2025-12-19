@@ -1337,20 +1337,38 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
     }
 });
 
+// Rota para buscar estatísticas financeiras Reais (Protegida por Admin)
 app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
     try {
-        const snapshot = await db.collection('vendas_playstore').get();
-        const faturamentoMensal = {};
+        console.log("[STATS] Calculando faturamento mensal...");
+        
+        // Busca todas as vendas registradas
+        const snapshot = await db.collection('vendas_playstore').orderBy('ts', 'asc').get();
+        
+        const faturamentoPorMes = {};
 
         snapshot.forEach(doc => {
             const venda = doc.data();
-            const mes = venda.mesAno;
-            faturamentoMensal[mes] = (faturamentoMensal[mes] || 0) + venda.valor;
+            const mes = venda.mesAno; // Ex: "2025-12"
+            const valor = venda.valorBRL || 0;
+
+            // Soma o valor ao mês correspondente
+            if (!faturamentoPorMes[mes]) {
+                faturamentoPorMes[mes] = 0;
+            }
+            faturamentoPorMes[mes] += valor;
         });
 
-        res.json({ success: true, dados: faturamentoMensal });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
+        // Retorna os dados formatados para o Chart.js
+        res.status(200).json({ 
+            success: true, 
+            labels: Object.keys(faturamentoPorMes), 
+            valores: Object.values(faturamentoPorMes) 
+        });
+
+    } catch (error) {
+        console.error("Erro ao gerar estatísticas:", error);
+        res.status(500).json({ success: false, message: error.message });
     }
 });
 
