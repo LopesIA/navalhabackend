@@ -1259,7 +1259,7 @@ app.get('/cron/reset-agenda', async (req, res) => {
 
 app.post('/api/confirmar-compra-real', async (req, res) => {
     const { uid, skuId, purchaseToken } = req.body;
-    // SEU ID REAL MANTIDO
+    // MANTIDO: ID REAL DO SEU APP
     const PACKAGE_NAME = "com.hildomatos.baber"; 
 
     if (!uid || !skuId || !purchaseToken) {
@@ -1267,14 +1267,30 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
     }
 
     try {
-        // Usa a instância já autenticada do topo do arquivo
+        // 1. Busca os detalhes da compra no Google Play Console
         const googleRes = await playDeveloperApi.purchases.products.get({
             packageName: PACKAGE_NAME,
             productId: skuId,
             token: purchaseToken
         });
 
+        // 2. Verifica se a compra está aprovada (State 0 = Purchased)
         if (googleRes.data.purchaseState === 0) {
+            
+            // --- NOVO: RECONHECER A COMPRA (ACKNOWLEDGE) ---
+            // Isso avisa ao Google que você entregou o produto e evita estornos automáticos.
+            try {
+                await playDeveloperApi.purchases.products.acknowledge({
+                    packageName: PACKAGE_NAME,
+                    productId: skuId,
+                    token: purchaseToken
+                });
+                console.log(`[GOOGLE] Compra ${skuId} reconhecida com sucesso.`);
+            } catch (ackError) {
+                // Se der erro aqui, pode ser que já tenha sido reconhecida, apenas avisamos no log
+                console.warn("[GOOGLE] Aviso no Acknowledge:", ackError.message);
+            }
+
             // --- TABELA DE DIAMANTES (MANTIDA) ---
             const tabelaPrecos = { 
                 'diamante_1': 1, 'diamante_3': 3, 'diamante_10': 10, 
@@ -1282,26 +1298,26 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
             };
             const qtd = tabelaPrecos[skuId] || 0;
 
-            // --- NOVA TABELA DE VALORES EM REAIS (PARA ESTATÍSTICAS) ---
+            // --- TABELA DE VALORES BRL (MANTIDA PARA O GRÁFICO) ---
             const tabelaValoresBRL = { 
                 'diamante_1': 4.90, 'diamante_3': 14.90, 'diamante_10': 44.90, 
                 'diamante_25': 99.90, 'diamante_100': 349.90 
             };
             const valorPagoBRL = tabelaValoresBRL[skuId] || 0;
-            const mesAnoAtual = new Date().toISOString().substring(0, 7); // Ex: "2025-12"
+            const mesAnoAtual = new Date().toISOString().substring(0, 7); 
 
             const userRef = db.collection('usuarios').doc(uid);
-            const vendaRef = db.collection('vendas_playstore').doc(); // Novo documento de extrato
+            const vendaRef = db.collection('vendas_playstore').doc(); 
 
-            // --- TRANSAÇÃO ATUALIZADA ---
+            // --- TRANSAÇÃO (MANTIDA E SEGURA) ---
             await db.runTransaction(async (t) => {
                 const doc = await t.get(userRef);
                 const saldo = doc.data().saldoDigital || 0;
                 
-                // 1. Atualiza o saldo de diamantes do usuário (Lógica Original)
+                // 1. Atualiza o saldo do usuário
                 t.update(userRef, { saldoDigital: saldo + qtd });
 
-                // 2. Registra o extrato da venda (Nova Lógica para o Gráfico)
+                // 2. Registra o extrato para o gráfico do Admin
                 t.set(vendaRef, {
                     uid: uid,
                     skuId: skuId,
@@ -1311,7 +1327,7 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
                 });
             });
 
-            res.json({ success: true, message: "Diamantes entregues e venda registrada no extrato!" });
+            res.json({ success: true, message: "Diamantes entregues, reconhecidos e registrados!" });
         } else {
             res.status(400).json({ success: false, message: "Compra não aprovada pelo Google." });
         }
