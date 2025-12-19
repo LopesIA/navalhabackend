@@ -1259,7 +1259,7 @@ app.get('/cron/reset-agenda', async (req, res) => {
 
 app.post('/api/confirmar-compra-real', async (req, res) => {
     const { uid, skuId, purchaseToken } = req.body;
-    // USE O SEU ID REAL AQUI
+    // SEU ID REAL MANTIDO
     const PACKAGE_NAME = "com.hildomatos.baber"; 
 
     if (!uid || !skuId || !purchaseToken) {
@@ -1275,26 +1275,66 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
         });
 
         if (googleRes.data.purchaseState === 0) {
+            // --- TABELA DE DIAMANTES (MANTIDA) ---
             const tabelaPrecos = { 
                 'diamante_1': 1, 'diamante_3': 3, 'diamante_10': 10, 
                 'diamante_25': 25, 'diamante_100': 100 
             };
             const qtd = tabelaPrecos[skuId] || 0;
 
+            // --- NOVA TABELA DE VALORES EM REAIS (PARA ESTATÍSTICAS) ---
+            const tabelaValoresBRL = { 
+                'diamante_1': 4.90, 'diamante_3': 14.90, 'diamante_10': 44.90, 
+                'diamante_25': 99.90, 'diamante_100': 349.90 
+            };
+            const valorPagoBRL = tabelaValoresBRL[skuId] || 0;
+            const mesAnoAtual = new Date().toISOString().substring(0, 7); // Ex: "2025-12"
+
             const userRef = db.collection('usuarios').doc(uid);
+            const vendaRef = db.collection('vendas_playstore').doc(); // Novo documento de extrato
+
+            // --- TRANSAÇÃO ATUALIZADA ---
             await db.runTransaction(async (t) => {
                 const doc = await t.get(userRef);
                 const saldo = doc.data().saldoDigital || 0;
+                
+                // 1. Atualiza o saldo de diamantes do usuário (Lógica Original)
                 t.update(userRef, { saldoDigital: saldo + qtd });
+
+                // 2. Registra o extrato da venda (Nova Lógica para o Gráfico)
+                t.set(vendaRef, {
+                    uid: uid,
+                    skuId: skuId,
+                    valorBRL: valorPagoBRL,
+                    ts: admin.firestore.FieldValue.serverTimestamp(),
+                    mesAno: mesAnoAtual
+                });
             });
 
-            res.json({ success: true, message: "Diamantes entregues!" });
+            res.json({ success: true, message: "Diamantes entregues e venda registrada no extrato!" });
         } else {
             res.status(400).json({ success: false, message: "Compra não aprovada pelo Google." });
         }
     } catch (error) {
         console.error("Erro na validação do Google:", error.message);
         res.status(500).json({ success: false, message: "Erro ao validar compra." });
+    }
+});
+
+app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
+    try {
+        const snapshot = await db.collection('vendas_playstore').get();
+        const faturamentoMensal = {};
+
+        snapshot.forEach(doc => {
+            const venda = doc.data();
+            const mes = venda.mesAno;
+            faturamentoMensal[mes] = (faturamentoMensal[mes] || 0) + venda.valor;
+        });
+
+        res.json({ success: true, dados: faturamentoMensal });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 
