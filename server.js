@@ -2,29 +2,30 @@
 
 // Carrega as variáveis de ambiente do arquivo .env (essencial para o Render)
 require('dotenv').config();
-
-// --- IMPORTS NECESSÁRIOS ---
 const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
+const { google } = require('googleapis'); // <--- SÓ UMA VEZ AQUI NO TOPO!
 
-// --- INICIALIZAÇÃO DO FIREBASE ADMIN ---
-// A inicialização agora é mais robusta para ambientes de produção como o Render.
-try {
-    const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+// --- INICIALIZAÇÃO DO FIREBASE ---
+const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+if (!admin.apps.length) {
     admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+        credential: admin.credential.cert(serviceAccount)
     });
-    console.log("Firebase Admin inicializado com sucesso.");
-} catch (e) {
-    console.error("Erro fatal ao inicializar o Firebase Admin. Verifique a variável de ambiente GOOGLE_APPLICATION_CREDENTIALS.", e);
-    process.exit(1);
 }
-
-const app = express();
 const db = admin.firestore();
 
-// ... logo após const db = admin.firestore();
+// --- CONFIGURAÇÃO DA GOOGLE PLAY API (REUTILIZANDO SUA CHAVE DO RENDER) ---
+const authPlayStore = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
+    scopes: ['https://www.googleapis.com/auth/androidpublisher'],
+});
+
+const playDeveloperApi = google.androidpublisher({ 
+    version: 'v3', 
+    auth: authPlayStore 
+});
 
 // --- LÓGICA DO BOT DE MENSAGENS ---
 const botMessages = [
@@ -245,61 +246,6 @@ app.post('/enviar-notificacao', async (req, res) => {
     }
 });
 
-const { google } = require('googleapis');
-
-// --- CONFIGURAÇÃO DA GOOGLE PLAY API ---
-// Você precisará baixar a chave JSON do seu Google Cloud Service Account
-const authPlayStore = new google.auth.GoogleAuth({
-  keyFile: './sua-chave-google-cloud.json', // Caminho para sua chave real
-  scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-});
-const playDeveloperApi = google.androidpublisher({ version: 'v3', auth: authPlayStore });
-
-app.post('/api/confirmar-compra-real', async (req, res) => {
-    const { uid, skuId, purchaseToken } = req.body;
-    const PACKAGE_NAME = "com.seuapp.barberconnect"; // O ID do seu app na Play Store
-
-    if (!uid || !skuId || !purchaseToken) {
-        return res.status(400).json({ success: false, message: "Dados incompletos." });
-    }
-
-    try {
-        // 1. VALIDAR DIRETAMENTE NO GOOGLE
-        const googleRes = await playDeveloperApi.purchases.products.get({
-            packageName: PACKAGE_NAME,
-            productId: skuId,
-            token: purchaseToken
-        });
-
-        // 2. VERIFICAR SE A COMPRA FOI REALMENTE CONCLUÍDA (purchaseState 0 = Comprado)
-        if (googleRes.data.purchaseState === 0) {
-            
-            // Tabela de valores (mesma lógica)
-            const tabelaPrecos = { 'diamante_1': 1, 'diamante_10': 10, 'diamante_100': 100 };
-            const qtdDiamantes = tabelaPrecos[skuId] || 0;
-
-            const userRef = db.collection('usuarios').doc(uid);
-            
-            await db.runTransaction(async (t) => {
-                const doc = await t.get(userRef);
-                const saldoAtual = doc.data().saldoDigital || 0;
-                t.update(userRef, { 
-                    saldoDigital: saldoAtual + qtdDiamantes,
-                    ultimaCompraToken: purchaseToken // Salva o token para evitar que usem o mesmo 2x
-                });
-            });
-
-            return res.json({ success: true, message: "Compra validada e diamantes entregues!" });
-        } else {
-            return res.status(400).json({ success: false, message: "Compra não aprovada pelo Google." });
-        }
-
-    } catch (error) {
-        console.error("ERRO NA VALIDAÇÃO REAL:", error);
-        res.status(500).json({ success: false, message: "Erro ao validar com o Google." });
-    }
-});
-
 // Rota para notificação em massa
 app.post('/enviar-notificacao-massa', async (req, res) => {
     const { title, body, adminUid } = req.body;
@@ -396,7 +342,7 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
 
 // --- NOVAS ROTAS DE ADMIN E GOOGLE PLAY ---
 
-const { google } = require('googleapis');
+
 
 // Inicializa o cliente da API do Google Play
 const androidpublisher = google.androidpublisher('v3');
@@ -1326,6 +1272,47 @@ app.get('/cron/reset-agenda', async (req, res) => {
     } catch (error) {
         console.error('ERRO NO CRON:', error);
         res.status(500).send('ERRO: Falha ao ativar horários.');
+    }
+});
+
+app.post('/api/confirmar-compra-real', async (req, res) => {
+    const { uid, skuId, purchaseToken } = req.body;
+    const PACKAGE_NAME = "com.hildomatos.baber"; // Seu ID oficial do Android Studio
+
+    if (!uid || !skuId || !purchaseToken) {
+        return res.status(400).json({ success: false, message: "Dados incompletos." });
+    }
+
+    try {
+        // Valida o token recebido com o Google
+        const googleRes = await playDeveloperApi.purchases.products.get({
+            packageName: PACKAGE_NAME,
+            productId: skuId,
+            token: purchaseToken
+        });
+
+        // 0 = Comprado com sucesso
+        if (googleRes.data.purchaseState === 0) {
+            const tabelaPrecos = { 
+                'diamante_1': 1, 'diamante_3': 3, 'diamante_10': 10, 
+                'diamante_25': 25, 'diamante_100': 100 
+            };
+            const qtd = tabelaPrecos[skuId] || 0;
+
+            const userRef = db.collection('usuarios').doc(uid);
+            await db.runTransaction(async (t) => {
+                const doc = await t.get(userRef);
+                const saldo = doc.data().saldoDigital || 0;
+                t.update(userRef, { saldoDigital: saldo + qtd });
+            });
+
+            res.json({ success: true, message: "Diamantes entregues!" });
+        } else {
+            res.status(400).json({ success: false, message: "Compra não aprovada." });
+        }
+    } catch (error) {
+        console.error("Erro na validação:", error);
+        res.status(500).json({ success: false, message: "Erro ao validar compra." });
     }
 });
 
