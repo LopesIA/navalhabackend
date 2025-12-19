@@ -15,6 +15,7 @@ if (!admin.apps.length) {
     });
 }
 const db = admin.firestore();
+const app = express();
 
 // --- CONFIGURAÇÃO DA GOOGLE PLAY API (REUTILIZANDO SUA CHAVE DO RENDER) ---
 const authPlayStore = new google.auth.GoogleAuth({
