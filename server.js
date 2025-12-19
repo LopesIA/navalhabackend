@@ -17,21 +17,32 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const app = express();
 
-// Middleware de verificação de admin para proteger as rotas
+// Middleware de verificação de admin único para proteger as rotas
 const isAdmin = async (req, res, next) => {
     const { adminUid } = req.body;
-    if (!adminUid) return res.status(400).json({ message: "ID do Admin é obrigatório." });
+    
+    // 1. Verifica se o UID foi enviado
+    if (!adminUid) {
+        return res.status(400).json({ message: "ID do Admin é obrigatório." });
+    }
+
     try {
+        // 2. Busca o documento no Firestore
         const adminDoc = await db.collection('usuarios').doc(adminUid).get();
+        
+        // 3. Valida se o usuário existe e se é do tipo 'admin'
         if (!adminDoc.exists || adminDoc.data().tipo !== 'admin') {
             return res.status(403).json({ message: "Acesso negado. Permissão de Admin necessária." });
         }
-        next();
+        
+        // 4. Tudo certo, prossegue para a rota
+        next(); 
     } catch (e) {
+        // 5. Tratamento de erro de comunicação com o banco
+        console.error("Erro no middleware isAdmin:", e.message);
         return res.status(500).json({ message: "Erro de autenticação do admin.", error: e.message });
     }
 };
-
 // --- CONFIGURAÇÃO DA GOOGLE PLAY API (REUTILIZANDO SUA CHAVE DO RENDER) ---
 const authPlayStore = new google.auth.GoogleAuth({
     credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
@@ -351,23 +362,6 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
         });
     }
 });
-
-// Middleware de verificação de admin para proteger as rotas
-const isAdmin = async (req, res, next) => {
-    const { adminUid } = req.body;
-    if (!adminUid) {
-        return res.status(400).json({ message: "ID do Admin é obrigatório." });
-    }
-    try {
-        const adminDoc = await db.collection('usuarios').doc(adminUid).get();
-        if (!adminDoc.exists || adminDoc.data().tipo !== 'admin') {
-            return res.status(403).json({ message: "Acesso negado. Permissão de Admin necessária." });
-        }
-        next(); // Se for admin, continua para a próxima função (a rota em si)
-    } catch (e) {
-        return res.status(500).json({ message: "Erro de autenticação do admin.", error: e.message });
-    }
-};
 
 // Rota para atualizar dados do usuário no Firestore
 app.post('/admin/update-user-firestore', isAdmin, async (req, res) => {
