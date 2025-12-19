@@ -777,6 +777,52 @@ app.get('/cron/postar-codigo-blog', async (req, res) => {
     }
 });
 
+// Rota de Faxina Geral: Remove usuários do Firestore que não existem mais no Auth
+app.post('/admin/sync-database-cleanup', isAdmin, async (req, res) => {
+    console.log("[CLEANUP] Iniciando varredura de usuários fantasmas...");
+    let removidos = 0;
+    let verificados = 0;
+
+    try {
+        const usersSnap = await db.collection('usuarios').get();
+        
+        for (const doc of usersSnap.docs) {
+            const uid = doc.id;
+            verificados++;
+
+            try {
+                // Tenta buscar o usuário no Firebase Authentication
+                await admin.auth().getUser(uid);
+            } catch (error) {
+                // Se o erro for 'user-not-found', significa que o usuário foi deletado do Auth
+                if (error.code === 'auth/user-not-found') {
+                    console.log(`[CLEANUP] Removendo usuário fantasma: ${uid}`);
+                    
+                    // 1. Deleta o documento do usuário
+                    await doc.ref.delete();
+                    
+                    // 2. Opcional: Se você tiver fotos na 'batalha_likes' desse usuário, limpe também
+                    const batalhaSnap = await db.collection('batalha_likes').where('ownerUid', '==', uid).get();
+                    const batch = db.batch();
+                    batalhaSnap.forEach(bDoc => batch.delete(bDoc.ref));
+                    await batch.commit();
+
+                    removidos++;
+                }
+            }
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: `Faxina concluída! Verificados: ${verificados}, Removidos: ${removidos}` 
+        });
+
+    } catch (error) {
+        console.error("Erro na faxina geral:", error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
 // ADICIONE ESTA NOVA ROTA AO FINAL DO ARQUIVO SERVER.JS, ANTES DA ROTA '/'
 // Rota de CRON para limpar fotos de clientes expiradas
 app.get('/cron/limpar-fotos-portfolio', async (req, res) => {
