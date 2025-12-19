@@ -336,17 +336,6 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
     }
 });
 
-// ADICIONE ESTE BLOCO DE CÓDIGO NO SERVER.JS
-
-// COLE ESTE BLOCO CORRIGIDO NO LUGAR DO QUE VOCÊ APAGOU
-
-// --- NOVAS ROTAS DE ADMIN E GOOGLE PLAY ---
-
-
-
-// Inicializa o cliente da API do Google Play
-const androidpublisher = google.androidpublisher('v3');
-
 // Middleware de verificação de admin para proteger as rotas
 const isAdmin = async (req, res, next) => {
     const { adminUid } = req.body;
@@ -509,69 +498,6 @@ async function activateBenefitInFirestore(uid, sku) {
         sincronizarPortfolioEmAlta(uid);
     }
 }
-
-// Rota para validar a compra da Google Play
-app.post('/google-play/validate-purchase', async (req, res) => {
-    const { purchaseToken, sku, uid } = req.body;
-    if (!purchaseToken || !sku || !uid) {
-        return res.status(400).json({ success: false, message: 'purchaseToken, sku e uid são obrigatórios.' });
-    }
-
-    try {
-        // Autentica com a API do Google
-        const auth = new google.auth.GoogleAuth({
-            credentials: JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS),
-            scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-        });
-        google.options({ auth });
-        
-        const packageName = 'com.kingagenda.site'; // <-- IMPORTANTE: SUBSTITUA PELO NOME DO SEU PACOTE
-
-        // Verifica se o token já foi validado antes para evitar reativação
-        const purchaseRecordRef = db.collection('google_play_purchases').doc(purchaseToken);
-        const purchaseRecord = await purchaseRecordRef.get();
-        if (purchaseRecord.exists) {
-            console.warn(`Tentativa de revalidar um purchaseToken já processado: ${purchaseToken}`);
-            return res.status(409).json({ success: false, message: 'Esta compra já foi processada.' });
-        }
-
-        // Consulta a API do Google Play para validar a compra
-        const result = await androidpublisher.purchases.products.get({
-            packageName: packageName,
-            productId: sku,
-            token: purchaseToken,
-        });
-
-        // 0 = Comprado, 1 = Cancelado, 2 = Pendente
-        if (result.data.purchaseState === 0) {
-            // A compra é válida!
-            // Ativa o benefício para o usuário no Firestore
-            await activateBenefitInFirestore(uid, sku);
-
-            // Salva um registro da compra para evitar reprocessamento
-            await purchaseRecordRef.set({
-                uid: uid,
-                sku: sku,
-                validationTimestamp: admin.firestore.FieldValue.serverTimestamp(),
-                orderId: result.data.orderId
-            });
-
-            // Responde com sucesso para o frontend
-            return res.status(200).json({ success: true, message: 'Compra validada e benefício ativado!' });
-        } else {
-            // A compra não está em estado "Comprado"
-            throw new Error(`Status da compra inválido: ${result.data.purchaseState}`);
-        }
-
-    } catch (error) {
-        console.error('Erro na validação da compra do Google Play:', error.message);
-        // O código 404 geralmente significa que a compra não foi encontrada (token inválido)
-        if (error.code === 404) {
-             return res.status(404).json({ success: false, message: 'Compra não encontrada. Verifique o purchaseToken.' });
-        }
-        return res.status(500).json({ success: false, message: 'Erro interno ao validar a compra.', error: error.message });
-    }
-});
 
 // Rota para buscar detalhes de um usuário (Auth e Firestore)
 app.post('/admin/get-user-details', isAdmin, async (req, res) => {
@@ -1277,21 +1203,21 @@ app.get('/cron/reset-agenda', async (req, res) => {
 
 app.post('/api/confirmar-compra-real', async (req, res) => {
     const { uid, skuId, purchaseToken } = req.body;
-    const PACKAGE_NAME = "com.hildomatos.baber"; // Seu ID oficial do Android Studio
+    // USE O SEU ID REAL AQUI
+    const PACKAGE_NAME = "com.hildomatos.baber"; 
 
     if (!uid || !skuId || !purchaseToken) {
         return res.status(400).json({ success: false, message: "Dados incompletos." });
     }
 
     try {
-        // Valida o token recebido com o Google
+        // Usa a instância já autenticada do topo do arquivo
         const googleRes = await playDeveloperApi.purchases.products.get({
             packageName: PACKAGE_NAME,
             productId: skuId,
             token: purchaseToken
         });
 
-        // 0 = Comprado com sucesso
         if (googleRes.data.purchaseState === 0) {
             const tabelaPrecos = { 
                 'diamante_1': 1, 'diamante_3': 3, 'diamante_10': 10, 
@@ -1308,10 +1234,10 @@ app.post('/api/confirmar-compra-real', async (req, res) => {
 
             res.json({ success: true, message: "Diamantes entregues!" });
         } else {
-            res.status(400).json({ success: false, message: "Compra não aprovada." });
+            res.status(400).json({ success: false, message: "Compra não aprovada pelo Google." });
         }
     } catch (error) {
-        console.error("Erro na validação:", error);
+        console.error("Erro na validação do Google:", error.message);
         res.status(500).json({ success: false, message: "Erro ao validar compra." });
     }
 });
