@@ -912,7 +912,7 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB CORRIGIDO (Fuso Horário Brasil + 20min) ---
+// --- CRON JOB ATUALIZADO (SUPORTE A DATAS FUTURAS + Fuso Brasil) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
@@ -927,44 +927,54 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     // Isso cria um objeto Date que representa a hora atual no Brasil
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
 
+    // Helper para formatar YYYY-MM-DD no fuso correto
+    const formatDateIso = (d) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     const batch = db.batch();
     let contador = 0;
 
     try {
         // === 1. LEMBRETE DE 1 HORA ANTES ===
-        // Janela: Daqui a 60 minutos (com margem de 5 min para garantir)
+        // Calcula o tempo futuro (Agora + 60min)
         const futuro1h = new Date(agoraBrasil.getTime() + 60 * 60 * 1000);
         
-        // Pega HH:MM do horário que será daqui a 1 hora
+        // Extrai Horário (HH:MM) e Data (YYYY-MM-DD) do momento do lembrete
         const hora1h = `${String(futuro1h.getHours()).padStart(2,'0')}:${String(futuro1h.getMinutes()).padStart(2,'0')}`;
+        const data1h = formatDateIso(futuro1h); 
         
-        console.log(`[CRON] Verificando agendamentos para 1h antes: Procurando horário ${hora1h}`);
+        console.log(`[CRON] Buscando para 1h antes: ${data1h} às ${hora1h}`);
 
         const snap1h = await db.collection('agendamentos')
             .where('status', 'in', ['confirmado', 'conclusão pendente'])
             .where('lembrete1hEnviado', '==', false)
-            .where('horario', '==', hora1h) // Busca exato ou poderia usar intervalo
+            .where('horario', '==', hora1h) // Bate o horário
+            .where('data', '==', data1h)     // <--- NOVO: Bate a data exata!
             .get();
 
         snap1h.forEach(doc => {
             const ag = doc.data();
-            // Verifica se o agendamento é de HOJE (comparando timestamps aproximados ou string de dia se tiver)
-            // Assumindo que agendamentos pendentes são recentes
-            sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é às ${ag.horario}.`, { link: '#historico' });
+            sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
             batch.update(doc.ref, { lembrete1hEnviado: true });
             contador++;
         });
 
-        // === 2. LEMBRETE DE 20 MINUTOS ANTES (SOLICITADO) ===
+        // === 2. LEMBRETE DE 20 MINUTOS ANTES ===
         const futuro20min = new Date(agoraBrasil.getTime() + 20 * 60 * 1000);
         const hora20min = `${String(futuro20min.getHours()).padStart(2,'0')}:${String(futuro20min.getMinutes()).padStart(2,'0')}`;
+        const data20min = formatDateIso(futuro20min);
 
-        console.log(`[CRON] Verificando agendamentos para 20min antes: Procurando horário ${hora20min}`);
+        console.log(`[CRON] Buscando para 20min antes: ${data20min} às ${hora20min}`);
 
         const snap20min = await db.collection('agendamentos')
             .where('status', 'in', ['confirmado', 'conclusão pendente'])
-            .where('lembrete10minEnviado', '==', false) // Usamos o mesmo campo booleano do banco, mas a lógica agora é 20min
+            .where('lembrete10minEnviado', '==', false) // Campo legado (mantido nome original)
             .where('horario', '==', hora20min)
+            .where('data', '==', data20min)  // <--- NOVO: Bate a data exata!
             .get();
 
         snap20min.forEach(doc => {
@@ -972,10 +982,9 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             sendNotification(
                 ag.clienteUid, 
                 '🚀 É daqui a pouco!', 
-                `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app para evitar penalidades.`, 
+                `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app.`, 
                 { link: '#historico' }
             );
-            // Atualiza o campo (o nome do campo continua 10min pra não quebrar compatibilidade, mas a lógica é 20)
             batch.update(doc.ref, { lembrete10minEnviado: true });
             contador++;
         });
@@ -984,18 +993,13 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
             const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
-            // Query simples (pode precisar de índice composto)
             const usuariosSumidos = await db.collection('usuarios')
                 .where('tipo', '==', 'cliente')
                 .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(50) // Limite para não estourar o cron
+                .limit(50) 
                 .get();
 
             usuariosSumidos.forEach(doc => {
-                // Lógica para não mandar todo dia (verificar campo 'ultimoAvisoRetencao')
-                // Simplificado aqui:
-                const u = doc.data();
-                // Só manda se não mandou nos ultimos 10 dias
                 sendNotification(
                     doc.id, 
                     '✂️ Tá na hora do talento?', 
@@ -1006,7 +1010,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         await batch.commit();
-        res.status(200).send(`OK (Brasil Time): Processado ${hora1h} e ${hora20min}. Total envios: ${contador}`);
+        res.status(200).send(`OK: Processado ${data1h} ${hora1h} e ${data20min} ${hora20min}. Envios: ${contador}`);
 
     } catch (error) {
         console.error(error);
