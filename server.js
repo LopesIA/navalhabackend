@@ -1376,28 +1376,50 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
     }
 });
 
-// --- NOVA ROTA PARA O WHATSAPP (EVOLUTION API) ---
-// Esta rota recebe as mensagens que o seu PC envia para o Render
+// --- CONFIGURAÇÃO DA IA GEMINI ---
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
         
-        // Verifica se é uma mensagem vindo do WhatsApp
         if (data.event === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const textoRecebido = mensagem.conversation || mensagem.extendedTextMessage?.text;
             const numeroRemetente = data.data.key.remoteJid;
 
+            if (!textoRecebido) return res.status(200).send('OK');
+
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: ${textoRecebido}`);
 
-            // AQUI É ONDE A IA VAI ENTRAR DEPOIS
-            // Por enquanto, vamos apenas responder um "OK" para o sistema não travar
-        }
+            // 1. A IA gera a resposta amigável
+            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis de barbearia. Cliente perguntou: ${textoRecebido}`;
+            const result = await modelIA.generateContent(prompt);
+            const respostaIA = result.response.text();
 
+            // 2. Manda de volta para o seu PC (Evolution API)
+            // IMPORTANTE: COLOQUE O LINK DO SEU NGROK ABAIXO!
+            const LINK_DO_NGROK = "COLE_AQUI_O_LINK_DO_NGROK"; 
+
+            await fetch(`${LINK_DO_NGROK}/message/sendText/king_bot`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': 'Ja997640401'
+                },
+                body: JSON.stringify({
+                    number: numeroRemetente,
+                    text: respostaIA
+                })
+            });
+            console.log(`[IA] Resposta enviada!`);
+        }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
-        console.error("Erro no Webhook do WhatsApp:", error);
-        res.status(500).send("Erro interno");
+        console.error("Erro no Webhook:", error);
+        res.status(500).send("Erro");
     }
 });
 
