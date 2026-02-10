@@ -1378,6 +1378,7 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
 
 // --- CONFIGURAÇÃO DA IA GEMINI ---
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+// Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -1385,6 +1386,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
         
+        // Verifica se chegou uma mensagem de texto
         if (data.event === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const textoRecebido = mensagem.conversation || mensagem.extendedTextMessage?.text;
@@ -1394,27 +1396,26 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: ${textoRecebido}`);
 
-            // 1. A IA gera a resposta amigável
-            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis de barbearia. Cliente perguntou: ${textoRecebido}`;
+            // 1. A IA gera a resposta personalizada para a Barbearia
+            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             const result = await modelIA.generateContent(prompt);
             const respostaIA = result.response.text();
 
-            // 2. Manda de volta para o seu PC (Evolution API)
-            // IMPORTANTE: COLOQUE O LINK DO SEU NGROK ABAIXO!
-            const LINK_DO_NGROK = "COLE_AQUI_O_LINK_DO_NGROK"; 
+            // 2. Envia de volta para o seu computador através do túnel da Cloudflare
+            const LINK_CLOUDFLARE = "https://dose-enquiry-subdivision-function.trycloudflare.com"; 
 
-            await fetch(`${LINK_DO_NGROK}/message/sendText/king_bot`, {
+            await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'apikey': 'Ja997640401'
+                    'apikey': 'Ja997640401' // Sua chave da API Evolution
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
                     text: respostaIA
                 })
             });
-            console.log(`[IA] Resposta enviada!`);
+            console.log(`[IA] Resposta enviada com sucesso!`);
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
