@@ -1376,6 +1376,31 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
     }
 });
 
+// --- NOVA ROTA PARA O WHATSAPP (EVOLUTION API) ---
+// Esta rota recebe as mensagens que o seu PC envia para o Render
+app.post('/webhook/whatsapp', async (req, res) => {
+    try {
+        const data = req.body;
+        
+        // Verifica se é uma mensagem vindo do WhatsApp
+        if (data.event === "MESSAGES_UPSERT") {
+            const mensagem = data.data.message;
+            const textoRecebido = mensagem.conversation || mensagem.extendedTextMessage?.text;
+            const numeroRemetente = data.data.key.remoteJid;
+
+            console.log(`[ZAP] Mensagem de ${numeroRemetente}: ${textoRecebido}`);
+
+            // AQUI É ONDE A IA VAI ENTRAR DEPOIS
+            // Por enquanto, vamos apenas responder um "OK" para o sistema não travar
+        }
+
+        res.status(200).send('EVENT_RECEIVED');
+    } catch (error) {
+        console.error("Erro no Webhook do WhatsApp:", error);
+        res.status(500).send("Erro interno");
+    }
+});
+
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
