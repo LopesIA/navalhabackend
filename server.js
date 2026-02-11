@@ -1441,13 +1441,13 @@ app.post('/webhook/whatsapp', async (req, res) => {
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
             
-            // Log para conferência (Não mostra a chave toda por segurança)
-            console.log(`[IA] Iniciando com chave final: ${API_KEY.substring(0, 6)}...`);
+            console.log(`[IA] Usando modelos atualizados de 2026...`);
 
             const tentativas = [
-                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, nome: "1.5-Flash (Latest)" },
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, nome: "1.5-Flash (v1 Estável)" },
-                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`, nome: "Gemini-Pro (Legado)" }
+                // Agora usamos os nomes exatos que o seu link /ia/modelos mostrou!
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.5 Flash" },
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.0 Flash" },
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${API_KEY}`, nome: "Gemini 2.5 Pro" }
             ];
 
             for (const tentativa of tentativas) {
@@ -1469,11 +1469,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
                         console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
                         break; 
                     } else {
-                        // Se der erro 404, o log abaixo vai mostrar o motivo real
-                        console.warn(`[IA] ${tentativa.nome} não respondeu. Erro:`, resData.error?.message || "Erro de permissão");
+                        console.warn(`[IA] ${tentativa.nome} falhou:`, resData.error?.message || "Erro de resposta");
                     }
                 } catch (err) {
-                    console.error(`[IA] Falha técnica em ${tentativa.nome}:`, err.message);
+                    console.error(`[IA] Erro na conexão:`, err.message);
                 }
             }
 
