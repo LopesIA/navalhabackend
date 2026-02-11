@@ -1380,7 +1380,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY, { apiVersion: "v1" });
 
 // --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -1419,12 +1419,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
             
             // --- IA GEMINI COM CONTINGÊNCIA (NOVO) ---
             const modelosParaTentar = [
-                "gemini-1.5-flash-latest",
-                "gemini-1.5-pro-latest",
-                "gemini-pro",
-                "gemini-1.5-flash",
-                "gemini-1.0-pro"
-            ];
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-1.0-pro"
+];
 
             let respostaIA = "";
 
