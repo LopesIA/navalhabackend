@@ -1378,10 +1378,6 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-
-// Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY, { apiVersion: "v1" });
-
 app.get('/ia/modelos', async (req, res) => {
     try {
         const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
