@@ -1383,32 +1383,31 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// --- ROTA DO WEBHOOK (ATUALIZADA PARA DEBUG) ---
+// --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
-        
-        // 1. ESPIÃO: Mostra no Render TUDO que chegar (Texto, Foto, Contato...)
-        console.log("========================================");
-        console.log(`[RENDER] Recebi um evento: ${data.event}`);
-        // console.log("Dados Brutos:", JSON.stringify(data, null, 2)); // Descomente se precisar ver tudo
+        const evento = data.event; // Pega o nome do evento
 
-        // Verifica se é uma atualização de mensagem
-        if (data.event === "MESSAGES_UPSERT") {
+        // 1. ESPIÃO: Mostra o que chegou
+        console.log(`[RENDER] Recebi: ${evento}`);
+
+        // CORREÇÃO AQUI: Aceita "messages.upsert" OU "MESSAGES_UPSERT"
+        if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             
             const mensagem = data.data.message;
             const key = data.data.key || {};
             const numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // Extração mais robusta do texto (pega texto simples ou resposta estendida)
+            // Extrai o texto de várias formas possíveis
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption ||
                 "";
 
-            console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}" | Fui eu? ${fromMe}`);
+            console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}"`);
 
             // Se não tiver texto ou se fui eu mesmo que mandei, ignora
             if (!textoRecebido || fromMe) {
@@ -1447,7 +1446,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
             });
             console.log(`[IA] Resposta enviada com sucesso!`);
         } else {
-            console.log(`[RENDER] Ignorando evento ${data.event} (Não é mensagem de texto)`);
+            // Se não for mensagem, apenas avisa (sem erro)
+            console.log(`[RENDER] Evento ignorado: ${evento}`);
         }
 
         res.status(200).send('EVENT_RECEIVED');
