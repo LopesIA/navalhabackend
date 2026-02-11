@@ -1402,7 +1402,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // O ID original (pode ser @lid ou @s.whatsapp.net)
+            const numeroRemetente = key.remoteJid; 
             const fromMe = key.fromMe;
 
             // Extração do texto
@@ -1411,7 +1411,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption || "";
 
-            // Ignora mensagens próprias ou vazias
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
@@ -1431,42 +1430,48 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
             } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ESTRATÉGIA DE ENVIO (DUPLA TENTATIVA) ---
+            // --- ESTRATÉGIA DE ENVIO (CORRIGIDA COM FORMATAÇÃO DE JID) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com";
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            // Função auxiliar que envia SEM 'options' para evitar a checagem de existência
             const enviarMensagem = async (destino) => {
+                // Adicionamos um pequeno delay artificial para evitar bloqueio de spam (Erro 400)
+                const body = {
+                    number: destino,
+                    options: { delay: 1200, presence: "composing", linkPreview: false },
+                    textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
+                };
+
                 return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json', 
-                        'apikey': API_KEY_EVO 
-                    },
-                    body: JSON.stringify({
-                        number: destino,
-                        textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
-                        // REMOVEMOS 'options' (delay/presence) propositalmente!
-                    })
+                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                    body: JSON.stringify(body)
                 });
             };
 
-            // TENTATIVA 1: Envia para o ID original (ex: @lid)
-            console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
+            // TENTATIVA 1: ID Original (@lid)
+            console.log(`[IA] Tentativa 1: ${numeroRemetente}`);
             let respZap = await enviarMensagem(numeroRemetente);
 
-            // TENTATIVA 2: Se der erro 400 ou 404, tenta enviar apenas para os números
-            if (respZap.status === 400 || respZap.status === 404) {
+            // TENTATIVA 2: Se falhar, FORÇA o formato antigo (@s.whatsapp.net)
+            if (respZap.status !== 201) {
                 const numeroLimpo = numeroRemetente.split('@')[0];
-                console.log(`[IA] Falha no JID (${respZap.status}). Tentativa 2: Enviando para número limpo ${numeroLimpo}...`);
-                respZap = await enviarMensagem(numeroLimpo);
+                // AQUI ESTÁ O PULO DO GATO: Adicionamos o sufixo manual
+                const idAntigo = `${numeroLimpo}@s.whatsapp.net`; 
+                
+                console.log(`[IA] Erro no JID novo. Tentativa 2 forçada para: ${idAntigo}`);
+                respZap = await enviarMensagem(idAntigo);
             }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
+            
+            // Log de erro detalhado se ainda falhar
+            if (respZap.status !== 201) {
+                const erroMsg = await respZap.text();
+                console.error(`[IA] Motivo do erro 400: ${erroMsg}`);
+            }
         }
-        
         res.status(200).send('EVENT_RECEIVED');
-
     } catch (error) {
         console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado"); 
