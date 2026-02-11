@@ -1425,33 +1425,40 @@ app.post('/webhook/whatsapp', async (req, res) => {
             ];
 
             let respostaIA = "";
-            try {
-                console.log(`[IA] Tentando conexão direta com gemini-1.5-flash-latest...`);
-                
-                // Mudamos para 'v1beta' mas com o modelo 'latest', que é o mais compatível
-                const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
-                
-                const responseIA = await fetch(urlGemini, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: prompt }] }]
-                    })
-                });
+            const tentativas = [
+                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "1.5-Flash (v1beta)" },
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "1.5-Flash (v1)" },
+                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "Gemini-Pro (v1beta)" }
+            ];
 
-                const resData = await responseIA.json();
-                
-                if (resData.candidates && resData.candidates[0].content.parts[0].text) {
-                    respostaIA = resData.candidates[0].content.parts[0].text;
-                    console.log(`[IA] SUCESSO! O Gemini respondeu.`);
-                } else {
-                    console.error("[IA] Detalhes do erro do Google:", JSON.stringify(resData));
-                    throw new Error("O Google recebeu a chave, mas negou o modelo.");
+            for (const tentativa of tentativas) {
+                try {
+                    console.log(`[IA] Tentando: ${tentativa.nome}...`);
+                    
+                    const responseIA = await fetch(tentativa.url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }]
+                        })
+                    });
+
+                    const resData = await responseIA.json();
+                    
+                    if (resData.candidates && resData.candidates[0].content.parts[0].text) {
+                        respostaIA = resData.candidates[0].content.parts[0].text;
+                        console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
+                        break; // Conseguiu! Sai do loop.
+                    } else {
+                        console.warn(`[IA] ${tentativa.nome} falhou:`, resData.error?.message || "Erro desconhecido");
+                    }
+                } catch (err) {
+                    console.error(`[IA] Erro na conexão com ${tentativa.nome}:`, err.message);
                 }
+            }
 
-            } catch (err) {
-                console.error(`[IA] Erro:`, err.message);
-                respostaIA = "Olá! Estou finalizando minha configuração, mas já recebi sua mensagem e logo te respondo! 💈";
+            if (!respostaIA) {
+                respostaIA = "Olá! Estamos ajustando os últimos detalhes do meu sistema, mas já recebi sua mensagem e logo te respondo! 💈";
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
