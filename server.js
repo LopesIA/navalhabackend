@@ -1392,8 +1392,6 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
-// --- ROTA DO WEBHOOK (VERSÃO FINAL CONTRA ERRO 400) ---
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
@@ -1402,7 +1400,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // <--- VAMOS USAR O JID ORIGINAL (ex: ...@lid)
+            const numeroRemetente = key.remoteJid; // Usamos o JID original (@lid)
             const fromMe = key.fromMe;
 
             const textoRecebido = 
@@ -1412,10 +1410,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
-            // --- IA GEMINI (2.5 FLASH) ---
-            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
+            // --- IA GEMINI (MANTIDA 2.5 FLASH) ---
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
+            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
             
             try {
                 const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
@@ -1427,24 +1425,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
             } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO) ---
+            // --- ENVIO DE VOLTA (TÚNEL DIRETO) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
-            // --- PASSO 1: DESATIVAR A VERIFICAÇÃO DE NÚMERO (O PULO DO GATO) ---
-            // Isso envia um comando para o seu robô local parar de checar se o número "existe"
-            try {
-                await fetch(`${LINK_CLOUDFLARE}/settings/set/king_bot`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json', 'apikey': 'sjs04ji5xlvzb0bujyx6b' },
-                    body: JSON.stringify({ checkStatus: false }) 
-                });
-                console.log(`[IA] Verificação de número desativada para aceitar @lid.`);
-            } catch (e) {
-                console.warn("[IA] Não foi possível mudar settings, mas tentarei enviar...");
-            }
-
-            // --- PASSO 2: ENVIO DA MENSAGEM ---
-            console.log(`[IA] Enviando para o WhatsApp via túnel...`);
+            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
             
             const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
@@ -1453,17 +1437,12 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroRemetente, // Mantemos o JID original (@lid)
-                    textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
-                    options: {
-                        delay: 1200,
-                        presence: "composing",
-                        linkPreview: false
-                    }
+                    number: numeroRemetente, // Mantemos o ID completo com @lid
+                    textMessage: { text: respostaIA || "Opa! Já te respondo! 💈" }
                 })
             });
 
-            console.log(`[IA] Status do envio local: ${respZap.status}`);
+            console.log(`[IA] Status final do envio: ${respZap.status}`);
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
