@@ -1426,9 +1426,11 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             let respostaIA = "";
             try {
-                console.log(`[IA] Chamando API do Google diretamente (v1)...`);
+                console.log(`[IA] Tentando conexão direta com gemini-1.5-flash-latest...`);
                 
-const urlGemini = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;                
+                // Mudamos para 'v1beta' mas com o modelo 'latest', que é o mais compatível
+                const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`;
+                
                 const responseIA = await fetch(urlGemini, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1441,15 +1443,15 @@ const urlGemini = `https://generativelanguage.googleapis.com/v1/models/gemini-1.
                 
                 if (resData.candidates && resData.candidates[0].content.parts[0].text) {
                     respostaIA = resData.candidates[0].content.parts[0].text;
-                    console.log(`[IA] Sucesso com gemini-1.5-flash (v1)`);
+                    console.log(`[IA] SUCESSO! O Gemini respondeu.`);
                 } else {
-                    console.error("[IA] Erro na resposta do Google:", JSON.stringify(resData));
-                    throw new Error("Resposta da IA veio vazia ou erro na chave.");
+                    console.error("[IA] Detalhes do erro do Google:", JSON.stringify(resData));
+                    throw new Error("O Google recebeu a chave, mas negou o modelo.");
                 }
 
             } catch (err) {
-                console.error(`[IA] Erro Crítico:`, err.message);
-                respostaIA = "Olá! Tive um probleminha técnico, mas já recebi sua mensagem e logo te respondo! 💈";
+                console.error(`[IA] Erro:`, err.message);
+                respostaIA = "Olá! Estou finalizando minha configuração, mas já recebi sua mensagem e logo te respondo! 💈";
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
