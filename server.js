@@ -1477,7 +1477,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
-            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
+            const LINK_CLOUDFLARE = "https://specifically-openings-complications-boring.trycloudflare.com"; 
 
             console.log(`[IA] Enviando resposta via túnel...`);
             
@@ -1489,7 +1489,9 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
-                    text: respostaIA
+                    textMessage: {
+                        text: respostaIA  // O robô exige que o texto venha dentro de textMessage
+                    }
                 })
             });
             console.log(`[IA] Resposta enviada com sucesso!`);
