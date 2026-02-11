@@ -1425,30 +1425,33 @@ app.post('/webhook/whatsapp', async (req, res) => {
             ];
 
             let respostaIA = "";
+            try {
+                console.log(`[IA] Chamando API do Google diretamente (v1)...`);
+                
+                // Usamos a URL oficial da v1 com o modelo que você quer
+                const urlGemini = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
+                
+                const responseIA = await fetch(urlGemini, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
 
-            // Tenta cada modelo da lista até um funcionar
-            for (const nomeModelo of modelosParaTentar) {
-                try {
-                    console.log(`[IA] Tentando modelo: ${nomeModelo}...`);
-                    
-                    // A biblioteca usará a versão v1 configurada no topo
-                    const modelIA = genAI.getGenerativeModel({ model: nomeModelo });
-                    const result = await modelIA.generateContent(prompt);
-                    respostaIA = result.response.text();
-                    
-                    if (respostaIA) {
-                        console.log(`[IA] Sucesso com o modelo: ${nomeModelo}`);
-                        break; 
-                    }
-                } catch (err) {
-                    console.error(`[IA] Falha no modelo ${nomeModelo}:`, err.message);
-                    // Se falhar, o loop continua para o próximo modelo
+                const resData = await responseIA.json();
+                
+                if (resData.candidates && resData.candidates[0].content.parts[0].text) {
+                    respostaIA = resData.candidates[0].content.parts[0].text;
+                    console.log(`[IA] Sucesso com gemini-1.5-flash (v1)`);
+                } else {
+                    console.error("[IA] Erro na resposta do Google:", JSON.stringify(resData));
+                    throw new Error("Resposta da IA veio vazia ou erro na chave.");
                 }
-            }
 
-            // Resposta de segurança caso todos os modelos falhem (ex: erro de chave)
-            if (!respostaIA) {
-                respostaIA = "Olá! No momento estou passando por uma manutenção rápida, mas já recebi sua mensagem e logo te respondo! 💈";
+            } catch (err) {
+                console.error(`[IA] Erro Crítico:`, err.message);
+                respostaIA = "Olá! Tive um probleminha técnico, mas já recebi sua mensagem e logo te respondo! 💈";
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
