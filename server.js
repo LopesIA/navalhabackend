@@ -1382,6 +1382,20 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY, { apiVersion: "v1" });
 
+app.get('/ia/modelos', async (req, res) => {
+    try {
+        const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
+        const url = `https://generativelanguage.googleapis.com/v1/models?key=${API_KEY}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        // Isso vai nos mostrar EXATAMENTE quais modelos sua chave pode ver
+        res.json(data);
+    } catch (e) {
+        res.status(500).json({ erro: e.message });
+    }
+});
+
 // --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
