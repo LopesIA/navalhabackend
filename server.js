@@ -1398,18 +1398,14 @@ app.post('/webhook/whatsapp', async (req, res) => {
         const data = req.body;
         const evento = data.event; 
 
-        // 1. ESPIÃO: Mostra o que chegou no Render
         console.log(`[RENDER] Recebi: ${evento}`);
 
-        // Aceita tanto o formato novo quanto o antigo da Evolution API
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
-            
             const mensagem = data.data.message;
             const key = data.data.key || {};
             const numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // Extração robusta do texto
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
@@ -1418,70 +1414,43 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}"`);
 
-            // Bloqueia mensagens vazias ou enviadas pelo próprio bot (evita loop)
             if (!textoRecebido || fromMe) {
                 console.log("[ZAP] Ignorando (mensagem vazia ou enviada por mim).");
                 return res.status(200).send('IGNORED');
             }
 
-            // --- IA GEMINI COM CONTINGÊNCIA ---
+            // --- IA GEMINI (MODELOS 2026) ---
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
-            
-            // Lista de modelos: o 1.5-flash é a primeira tentativa conforme solicitado
-            const modelosParaTentar = [
-                "gemini-1.5-flash",
-                "gemini-1.5-flash-8b",
-                "gemini-1.0-pro"
-            ];
-
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
             
-            console.log(`[IA] Usando modelos atualizados de 2026...`);
-
             const tentativas = [
-                // Agora usamos os nomes exatos que o seu link /ia/modelos mostrou!
                 { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.5 Flash" },
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.0 Flash" },
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-pro:generateContent?key=${API_KEY}`, nome: "Gemini 2.5 Pro" }
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.0 Flash" }
             ];
 
             for (const tentativa of tentativas) {
                 try {
-                    console.log(`[IA] Tentando: ${tentativa.nome}...`);
-                    
                     const responseIA = await fetch(tentativa.url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        })
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                     });
-
                     const resData = await responseIA.json();
-                    
-                    if (resData.candidates && resData.candidates[0].content.parts[0].text) {
+                    if (resData.candidates) {
                         respostaIA = resData.candidates[0].content.parts[0].text;
                         console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
                         break; 
-                    } else {
-                        console.warn(`[IA] ${tentativa.nome} falhou:`, resData.error?.message || "Erro de resposta");
                     }
-                } catch (err) {
-                    console.error(`[IA] Erro na conexão:`, err.message);
-                }
+                } catch (err) { console.error(`[IA] Erro:`, err.message); }
             }
 
-            if (!respostaIA) {
-                respostaIA = "Olá! Estamos finalizando os ajustes do meu sistema. Já recebi sua mensagem e logo te respondo! 💈";
-            }
+            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO) ---
+            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
-            // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
-            const LINK_CLOUDFLARE = "https://specifically-openings-complications-boring.trycloudflare.com"; 
-
-            console.log(`[IA] Enviando resposta via túnel...`);
+            console.log(`[IA] Enviando para o WhatsApp via túnel...`);
             
-            await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+            const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1489,12 +1458,16 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
-                    textMessage: {
-                        text: respostaIA  // O robô exige que o texto venha dentro de textMessage
-                    }
+                    textMessage: { text: respostaIA || "Olá! Como posso ajudar?" }
                 })
             });
-            console.log(`[IA] Resposta enviada com sucesso!`);
+
+            console.log(`[IA] Status do envio local: ${respZap.status}`);
+            if (respZap.status !== 201 && respZap.status !== 200) {
+                const erroTexto = await respZap.text();
+                console.error(`[IA] O robô recusou o envio: ${erroTexto}`);
+            }
+
         } else {
             console.log(`[RENDER] Evento ignorado: ${evento}`);
         }
