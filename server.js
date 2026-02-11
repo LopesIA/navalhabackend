@@ -1425,10 +1425,20 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 });
                 const resData = await responseIA.json();
                 if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
-            } catch (err) { console.error("[IA] Erro:", err.message); }
+            } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ENVIO DE VOLTA (FORÇANDO O JID ORIGINAL) ---
+            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
+
+            // --- PASSO OBRIGATÓRIO: DESATIVAR VERIFICAÇÃO DE NÚMERO ---
+            // Isso força o robô a aceitar o @lid sem perguntar se ele existe
+            await fetch(`${LINK_CLOUDFLARE}/settings/set/king_bot`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'apikey': 'sjs04ji5xlvzb0bujyx6b' },
+                body: JSON.stringify({ verifyContact: false })
+            });
+
+            console.log(`[IA] Enviando para o WhatsApp via túnel...`);
             
             const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
@@ -1437,17 +1447,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroRemetente, // <--- ENVIAMOS O ID COMPLETO (@lid)
+                    number: numeroRemetente, // Usamos o JID original (@lid)
                     textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
                     options: {
-                        delay: 1200, // Pequeno atraso para o robô processar o ID
+                        delay: 1200,
                         presence: "composing",
                         linkPreview: false
                     }
                 })
             });
 
-            console.log(`[IA] Status: ${respZap.status} para o JID: ${numeroRemetente}`);
+            console.log(`[IA] Status do envio local: ${respZap.status}`);
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
