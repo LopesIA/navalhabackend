@@ -1393,67 +1393,42 @@ app.get('/ia/modelos', async (req, res) => {
 });
 
 // --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
+// --- ROTA DO WEBHOOK (VERSÃO FINAL CONTRA ERRO 400) ---
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
         const evento = data.event; 
 
-        console.log(`[RENDER] Recebi: ${evento}`);
-
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid;
+            const numeroRemetente = key.remoteJid; // <--- VAMOS USAR O JID ORIGINAL (ex: ...@lid)
             const fromMe = key.fromMe;
-
-            // --- AJUSTE PARA EVITAR ERRO 400 (LID) ---
-            // Remove sufixos como @lid ou @s.whatsapp.net para garantir que o validador local aceite o número
-            const numeroLimpo = numeroRemetente ? numeroRemetente.split('@')[0] : "";
 
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
-                mensagem.imageMessage?.caption ||
-                "";
+                mensagem.imageMessage?.caption || "";
 
-            console.log(`[ZAP] De: ${numeroRemetente} | Limpo: ${numeroLimpo} | Texto: "${textoRecebido}"`);
+            if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
-            if (!textoRecebido || fromMe) {
-                console.log("[ZAP] Ignorando (mensagem vazia ou enviada por mim).");
-                return res.status(200).send('IGNORED');
-            }
-
-            // --- IA GEMINI (MODELOS 2026) ---
-            // Configurado com os modelos que seu servidor confirmou estarem ativos
+            // --- IA GEMINI (2.5 FLASH) ---
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
             
-            const tentativas = [
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.5 Flash" },
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${API_KEY}`, nome: "Gemini 2.0 Flash" }
-            ];
+            try {
+                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const resData = await responseIA.json();
+                if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
+            } catch (err) { console.error("[IA] Erro:", err.message); }
 
-            for (const tentativa of tentativas) {
-                try {
-                    const responseIA = await fetch(tentativa.url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                    });
-                    const resData = await responseIA.json();
-                    if (resData.candidates && resData.candidates[0].content.parts[0].text) {
-                        respostaIA = resData.candidates[0].content.parts[0].text;
-                        console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
-                        break; 
-                    }
-                } catch (err) { console.error(`[IA] Erro:`, err.message); }
-            }
-
-            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO v1.8.2) ---
+            // --- ENVIO DE VOLTA (FORÇANDO O JID ORIGINAL) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
-
-            console.log(`[IA] Enviando para o WhatsApp via túnel...`);
             
             const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
@@ -1462,27 +1437,21 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroLimpo, // Enviamos o número puro para evitar erro de 'exists: false'
-                    textMessage: { 
-                        text: respostaIA || "Olá! Estamos ajustando os últimos detalhes, mas já recebi sua mensagem! 💈" 
+                    number: numeroRemetente, // <--- ENVIAMOS O ID COMPLETO (@lid)
+                    textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
+                    options: {
+                        delay: 1200, // Pequeno atraso para o robô processar o ID
+                        presence: "composing",
+                        linkPreview: false
                     }
                 })
             });
 
-            console.log(`[IA] Status do envio local: ${respZap.status}`);
-            if (respZap.status !== 201 && respZap.status !== 200) {
-                const erroTexto = await respZap.text();
-                console.error(`[IA] O robô local recusou o envio: ${erroTexto}`);
-            }
-
-        } else {
-            console.log(`[RENDER] Evento ignorado: ${evento}`);
+            console.log(`[IA] Status: ${respZap.status} para o JID: ${numeroRemetente}`);
         }
-
         res.status(200).send('EVENT_RECEIVED');
-
     } catch (error) {
-        console.error("Erro CRÍTICO no Webhook:", error);
+        console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado"); 
     }
 });
