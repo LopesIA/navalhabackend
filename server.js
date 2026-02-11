@@ -1386,12 +1386,12 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY, { apiVersion: "
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
-        const evento = data.event; // Pega o nome do evento
+        const evento = data.event; 
 
-        // 1. ESPIÃO: Mostra o que chegou
+        // 1. ESPIÃO: Mostra o que chegou no Render
         console.log(`[RENDER] Recebi: ${evento}`);
 
-        // CORREÇÃO AQUI: Aceita "messages.upsert" OU "MESSAGES_UPSERT"
+        // Aceita tanto o formato novo quanto o antigo da Evolution API
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             
             const mensagem = data.data.message;
@@ -1399,7 +1399,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
             const numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // Extrai o texto de várias formas possíveis
+            // Extração robusta do texto
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
@@ -1408,21 +1408,21 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}"`);
 
-            // Se não tiver texto ou se fui eu mesmo que mandei, ignora
+            // Bloqueia mensagens vazias ou enviadas pelo próprio bot (evita loop)
             if (!textoRecebido || fromMe) {
                 console.log("[ZAP] Ignorando (mensagem vazia ou enviada por mim).");
                 return res.status(200).send('IGNORED');
             }
 
-            // --- IA GEMINI ---
+            // --- IA GEMINI COM CONTINGÊNCIA ---
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             
-            // --- IA GEMINI COM CONTINGÊNCIA (NOVO) ---
+            // Lista de modelos: o 1.5-flash é a primeira tentativa conforme solicitado
             const modelosParaTentar = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-1.0-pro"
-];
+                "gemini-1.5-flash",
+                "gemini-1.5-pro",
+                "gemini-pro"
+            ];
 
             let respostaIA = "";
 
@@ -1430,6 +1430,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
             for (const nomeModelo of modelosParaTentar) {
                 try {
                     console.log(`[IA] Tentando modelo: ${nomeModelo}...`);
+                    
+                    // A biblioteca usará a versão v1 configurada no topo
                     const modelIA = genAI.getGenerativeModel({ model: nomeModelo });
                     const result = await modelIA.generateContent(prompt);
                     respostaIA = result.response.text();
@@ -1440,25 +1442,25 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     }
                 } catch (err) {
                     console.error(`[IA] Falha no modelo ${nomeModelo}:`, err.message);
+                    // Se falhar, o loop continua para o próximo modelo
                 }
             }
 
+            // Resposta de segurança caso todos os modelos falhem (ex: erro de chave)
             if (!respostaIA) {
                 respostaIA = "Olá! No momento estou passando por uma manutenção rápida, mas já recebi sua mensagem e logo te respondo! 💈";
             }
-            // ------------------------------------------
 
-            // --- ENVIO DE VOLTA (TÚNEL) ---
-            // CONFIRA SE O LINK DA TELA PRETA MUDOU!
+            // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
             const LINK_CLOUDFLARE = "https://specifically-openings-complications-boring.trycloudflare.com"; 
 
-            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
+            console.log(`[IA] Enviando resposta via túnel...`);
             
             await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // SUA CHAVE
+                    'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
@@ -1467,7 +1469,6 @@ app.post('/webhook/whatsapp', async (req, res) => {
             });
             console.log(`[IA] Resposta enviada com sucesso!`);
         } else {
-            // Se não for mensagem, apenas avisa (sem erro)
             console.log(`[RENDER] Evento ignorado: ${evento}`);
         }
 
