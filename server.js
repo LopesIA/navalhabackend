@@ -1408,7 +1408,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'apikey': 'Ja997640401' // Sua chave da API Evolution
+                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // Sua chave da API Evolution
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
