@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK CORRIGIDO (ROTA DUPLA + BYPASS DE VALIDAÇÃO) ---
+// --- WEBHOOK ATUALIZADO (CHAVE NOVA + GEMINI 3) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!"); 
@@ -1415,27 +1415,43 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- IA GEMINI (2.5 FLASH) ---
+            // --- IA GEMINI (CONFIGURAÇÃO NOVA) ---
             let respostaIA = "";
-            const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
+            
+            // 🔑 SUA NOVA CHAVE AQUI:
+            const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y"; 
+            
+            // 🧠 O MODELO QUE VOCÊ DESCOBRIU:
+            // Se der erro de "Model not found", troque para "gemini-2.0-flash-exp" ou "gemini-1.5-flash"
+            const MODEL_NAME = "gemini-3-flash-preview"; 
+            
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
             
             try {
-                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+                console.log(`[IA] Solicitando ao ${MODEL_NAME}...`);
+                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
+                
                 const resData = await responseIA.json();
-                if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
-            } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
+                
+                // Verificação de erro da API do Google
+                if (resData.error) {
+                    console.error(`[IA] Erro na API do Google: ${resData.error.message}`);
+                    respostaIA = "Desculpe, estou atualizando meu sistema. Tente novamente em instantes.";
+                } else if (resData.candidates) {
+                    respostaIA = resData.candidates[0].content.parts[0].text;
+                    console.log("[IA] Resposta gerada com sucesso!");
+                }
+            } catch (err) { console.error("[IA] Erro de Conexão Gemini:", err.message); }
 
-            // --- ESTRATÉGIA DE ENVIO (CORRIGIDA COM FORMATAÇÃO DE JID) ---
+            // --- ESTRATÉGIA DE ENVIO (TENTATIVA DUPLA ANTI-ERRO) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com";
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
-                // Adicionamos um pequeno delay artificial para evitar bloqueio de spam (Erro 400)
                 const body = {
                     number: destino,
                     options: { delay: 1200, presence: "composing", linkPreview: false },
@@ -1449,26 +1465,25 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 });
             };
 
-            // TENTATIVA 1: ID Original (@lid)
-            console.log(`[IA] Tentativa 1: ${numeroRemetente}`);
+            // TENTATIVA 1: ID Original (@lid ou @s.whatsapp.net)
+            console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
             let respZap = await enviarMensagem(numeroRemetente);
 
             // TENTATIVA 2: Se falhar, FORÇA o formato antigo (@s.whatsapp.net)
+            // Isso salva se o número vier errado do PC
             if (respZap.status !== 201) {
                 const numeroLimpo = numeroRemetente.split('@')[0];
-                // AQUI ESTÁ O PULO DO GATO: Adicionamos o sufixo manual
                 const idAntigo = `${numeroLimpo}@s.whatsapp.net`; 
                 
-                console.log(`[IA] Erro no JID novo. Tentativa 2 forçada para: ${idAntigo}`);
+                console.log(`[IA] Erro (${respZap.status}). Tentativa 2 forçada para: ${idAntigo}`);
                 respZap = await enviarMensagem(idAntigo);
             }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
             
-            // Log de erro detalhado se ainda falhar
             if (respZap.status !== 201) {
                 const erroMsg = await respZap.text();
-                console.error(`[IA] Motivo do erro 400: ${erroMsg}`);
+                console.error(`[IA] Motivo do erro: ${erroMsg}`);
             }
         }
         res.status(200).send('EVENT_RECEIVED');
