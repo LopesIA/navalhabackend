@@ -1425,10 +1425,15 @@ app.post('/webhook/whatsapp', async (req, res) => {
             ];
 
             let respostaIA = "";
+            const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
+            
+            // Log para conferência (Não mostra a chave toda por segurança)
+            console.log(`[IA] Iniciando com chave final: ${API_KEY.substring(0, 6)}...`);
+
             const tentativas = [
-                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "1.5-Flash (v1beta)" },
-                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "1.5-Flash (v1)" },
-                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`, nome: "Gemini-Pro (v1beta)" }
+                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, nome: "1.5-Flash (Latest)" },
+                { url: `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, nome: "1.5-Flash (v1 Estável)" },
+                { url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`, nome: "Gemini-Pro (Legado)" }
             ];
 
             for (const tentativa of tentativas) {
@@ -1448,17 +1453,18 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     if (resData.candidates && resData.candidates[0].content.parts[0].text) {
                         respostaIA = resData.candidates[0].content.parts[0].text;
                         console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
-                        break; // Conseguiu! Sai do loop.
+                        break; 
                     } else {
-                        console.warn(`[IA] ${tentativa.nome} falhou:`, resData.error?.message || "Erro desconhecido");
+                        // Se der erro 404, o log abaixo vai mostrar o motivo real
+                        console.warn(`[IA] ${tentativa.nome} não respondeu. Erro:`, resData.error?.message || "Erro de permissão");
                     }
                 } catch (err) {
-                    console.error(`[IA] Erro na conexão com ${tentativa.nome}:`, err.message);
+                    console.error(`[IA] Falha técnica em ${tentativa.nome}:`, err.message);
                 }
             }
 
             if (!respostaIA) {
-                respostaIA = "Olá! Estamos ajustando os últimos detalhes do meu sistema, mas já recebi sua mensagem e logo te respondo! 💈";
+                respostaIA = "Olá! Estamos finalizando os ajustes do meu sistema. Já recebi sua mensagem e logo te respondo! 💈";
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
