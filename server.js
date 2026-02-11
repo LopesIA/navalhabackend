@@ -1400,20 +1400,24 @@ app.post('/webhook/whatsapp', async (req, res) => {
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // Usamos o JID original (@lid)
+            const numeroRemetente = key.remoteJid; // Mantemos o JID original (@lid)
             const fromMe = key.fromMe;
 
+            // Extração do texto recebido
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption || "";
 
+            // Ignora se for mensagem vazia ou enviada pelo próprio bot
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
+
+            console.log(`[ZAP] Recebido de ${numeroRemetente}: "${textoRecebido}"`);
 
             // --- IA GEMINI (MANTIDA 2.5 FLASH) ---
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
-            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
+            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda ao cliente: ${textoRecebido}`;
             
             try {
                 const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
@@ -1422,13 +1426,18 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
                 const resData = await responseIA.json();
-                if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
-            } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
+                if (resData.candidates && resData.candidates[0].content.parts[0].text) {
+                    respostaIA = resData.candidates[0].content.parts[0].text;
+                    console.log(`[IA] SUCESSO com Gemini 2.5 Flash!`);
+                }
+            } catch (err) { 
+                console.error("[IA] Erro Gemini:", err.message); 
+            }
 
-            // --- ENVIO DE VOLTA (TÚNEL DIRETO) ---
+            // --- ENVIO DE VOLTA (TÚNEL DIRETO - VERSÃO SEM OPTIONS) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
-            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
+            console.log(`[IA] Enviando resposta silenciosa para ${numeroRemetente}...`);
             
             const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
@@ -1437,14 +1446,23 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroRemetente, // Mantemos o ID completo com @lid
-                    textMessage: { text: respostaIA || "Opa! Já te respondo! 💈" }
+                    number: numeroRemetente, // ID completo com @lid
+                    textMessage: { 
+                        text: respostaIA || "Olá! Como posso ajudar? 💈" 
+                    }
+                    // IMPORTANTE: Removemos o bloco 'options' para tentar pular a verificação de contato
                 })
             });
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
+            if (respZap.status !== 201 && respZap.status !== 200) {
+                const erroTexto = await respZap.text();
+                console.error(`[IA] O robô recusou o envio: ${erroTexto}`);
+            }
         }
+        
         res.status(200).send('EVENT_RECEIVED');
+
     } catch (error) {
         console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado"); 
