@@ -1383,31 +1383,42 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+// --- ROTA DO WEBHOOK (ATUALIZADA PARA DEBUG) ---
 app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
         
-        // Verifica se chegou uma mensagem (Evolution v1.8+)
-        // O evento principal costuma ser MESSAGES_UPSERT
+        // 1. ESPIÃO: Mostra no Render TUDO que chegar (Texto, Foto, Contato...)
+        console.log("========================================");
+        console.log(`[RENDER] Recebi um evento: ${data.event}`);
+        // console.log("Dados Brutos:", JSON.stringify(data, null, 2)); // Descomente se precisar ver tudo
+
+        // Verifica se é uma atualização de mensagem
         if (data.event === "MESSAGES_UPSERT") {
             
-            // CAMINHO PARA ACESSAR A MENSAGEM NA EVOLUTION
             const mensagem = data.data.message;
-            if (!mensagem) return res.status(200).send('OK'); // Ignora se não tiver mensagem
+            const key = data.data.key || {};
+            const numeroRemetente = key.remoteJid;
+            const fromMe = key.fromMe;
 
-            const textoRecebido = mensagem.conversation || mensagem.extendedTextMessage?.text;
-            const numeroRemetente = data.data.key.remoteJid;
-            const fromMe = data.data.key.fromMe; // Verifica se fui eu que mandei
+            // Extração mais robusta do texto (pega texto simples ou resposta estendida)
+            const textoRecebido = 
+                mensagem.conversation || 
+                mensagem.extendedTextMessage?.text || 
+                mensagem.imageMessage?.caption ||
+                "";
 
-            // Ignora se não tiver texto ou se a mensagem for minha (para evitar loop)
-            if (!textoRecebido || fromMe) return res.status(200).send('OK');
+            console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}" | Fui eu? ${fromMe}`);
 
-            console.log(`[ZAP] Mensagem de ${numeroRemetente}: ${textoRecebido}`);
+            // Se não tiver texto ou se fui eu mesmo que mandei, ignora
+            if (!textoRecebido || fromMe) {
+                console.log("[ZAP] Ignorando (mensagem vazia ou enviada por mim).");
+                return res.status(200).send('IGNORED');
+            }
 
-            // 1. A IA gera a resposta personalizada
+            // --- IA GEMINI ---
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             
-            // Tratamento de erro simples na IA
             let respostaIA = "";
             try {
                 const result = await modelIA.generateContent(prompt);
@@ -1417,27 +1428,32 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 respostaIA = "Desculpe, estou meio confuso agora. Pode repetir?";
             }
 
-            // 2. Envia de volta para o seu computador (Cloudflare)
-            // ATENÇÃO: Se fechar a janela preta do Cloudflare, ESSE LINK MUDA!
+            // --- ENVIO DE VOLTA (TÚNEL) ---
+            // CONFIRA SE O LINK DA TELA PRETA MUDOU!
             const LINK_CLOUDFLARE = "https://dose-enquiry-subdivision-function.trycloudflare.com"; 
 
+            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
+            
             await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // <--- SUA CHAVE NOVA ESTÁ AQUI (CERTO!)
+                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // SUA CHAVE
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
                     text: respostaIA
                 })
             });
-            console.log(`[IA] Resposta enviada!`);
+            console.log(`[IA] Resposta enviada com sucesso!`);
+        } else {
+            console.log(`[RENDER] Ignorando evento ${data.event} (Não é mensagem de texto)`);
         }
+
         res.status(200).send('EVENT_RECEIVED');
+
     } catch (error) {
-        console.error("Erro no Webhook:", error);
-        // Mesmo com erro, respondemos 200 pro WhatsApp não ficar tentando reenviar
+        console.error("Erro CRÍTICO no Webhook:", error);
         res.status(200).send("Erro processado"); 
     }
 });
