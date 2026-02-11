@@ -1420,17 +1420,15 @@ app.post('/webhook/whatsapp', async (req, res) => {
             // Lista de modelos: o 1.5-flash é a primeira tentativa conforme solicitado
             const modelosParaTentar = [
                 "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-pro"
+                "gemini-1.5-flash-8b",
+                "gemini-1.0-pro"
             ];
 
             let respostaIA = "";
             try {
                 console.log(`[IA] Chamando API do Google diretamente (v1)...`);
                 
-                // Usamos a URL oficial da v1 com o modelo que você quer
-                const urlGemini = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
-                
+const urlGemini = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;                
                 const responseIA = await fetch(urlGemini, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
