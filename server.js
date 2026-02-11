@@ -1406,13 +1406,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
             const numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
+            // --- AJUSTE PARA EVITAR ERRO 400 (LID) ---
+            // Remove sufixos como @lid ou @s.whatsapp.net para garantir que o validador local aceite o número
+            const numeroLimpo = numeroRemetente ? numeroRemetente.split('@')[0] : "";
+
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption ||
                 "";
 
-            console.log(`[ZAP] De: ${numeroRemetente} | Texto: "${textoRecebido}"`);
+            console.log(`[ZAP] De: ${numeroRemetente} | Limpo: ${numeroLimpo} | Texto: "${textoRecebido}"`);
 
             if (!textoRecebido || fromMe) {
                 console.log("[ZAP] Ignorando (mensagem vazia ou enviada por mim).");
@@ -1420,6 +1424,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
             }
 
             // --- IA GEMINI (MODELOS 2026) ---
+            // Configurado com os modelos que seu servidor confirmou estarem ativos
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
@@ -1437,7 +1442,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
                         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                     });
                     const resData = await responseIA.json();
-                    if (resData.candidates) {
+                    if (resData.candidates && resData.candidates[0].content.parts[0].text) {
                         respostaIA = resData.candidates[0].content.parts[0].text;
                         console.log(`[IA] SUCESSO com ${tentativa.nome}!`);
                         break; 
@@ -1445,7 +1450,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 } catch (err) { console.error(`[IA] Erro:`, err.message); }
             }
 
-            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO) ---
+            // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO v1.8.2) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
             console.log(`[IA] Enviando para o WhatsApp via túnel...`);
@@ -1457,15 +1462,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroRemetente,
-                    textMessage: { text: respostaIA || "Olá! Como posso ajudar?" }
+                    number: numeroLimpo, // Enviamos o número puro para evitar erro de 'exists: false'
+                    textMessage: { 
+                        text: respostaIA || "Olá! Estamos ajustando os últimos detalhes, mas já recebi sua mensagem! 💈" 
+                    }
                 })
             });
 
             console.log(`[IA] Status do envio local: ${respZap.status}`);
             if (respZap.status !== 201 && respZap.status !== 200) {
                 const erroTexto = await respZap.text();
-                console.error(`[IA] O robô recusou o envio: ${erroTexto}`);
+                console.error(`[IA] O robô local recusou o envio: ${erroTexto}`);
             }
 
         } else {
