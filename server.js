@@ -1381,7 +1381,6 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const modelIA = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 // --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -1418,14 +1417,38 @@ app.post('/webhook/whatsapp', async (req, res) => {
             // --- IA GEMINI ---
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
             
+            // --- IA GEMINI COM CONTINGÊNCIA (NOVO) ---
+            const modelosParaTentar = [
+                "gemini-1.5-flash-latest",
+                "gemini-1.5-pro-latest",
+                "gemini-pro",
+                "gemini-1.5-flash",
+                "gemini-1.0-pro"
+            ];
+
             let respostaIA = "";
-            try {
-                const result = await modelIA.generateContent(prompt);
-                respostaIA = result.response.text();
-            } catch (err) {
-                console.error("Erro na IA:", err);
-                respostaIA = "Desculpe, estou meio confuso agora. Pode repetir?";
+
+            // Tenta cada modelo da lista até um funcionar
+            for (const nomeModelo of modelosParaTentar) {
+                try {
+                    console.log(`[IA] Tentando modelo: ${nomeModelo}...`);
+                    const modelIA = genAI.getGenerativeModel({ model: nomeModelo });
+                    const result = await modelIA.generateContent(prompt);
+                    respostaIA = result.response.text();
+                    
+                    if (respostaIA) {
+                        console.log(`[IA] Sucesso com o modelo: ${nomeModelo}`);
+                        break; 
+                    }
+                } catch (err) {
+                    console.error(`[IA] Falha no modelo ${nomeModelo}:`, err.message);
+                }
             }
+
+            if (!respostaIA) {
+                respostaIA = "Olá! No momento estou passando por uma manutenção rápida, mas já recebi sua mensagem e logo te respondo! 💈";
+            }
+            // ------------------------------------------
 
             // --- ENVIO DE VOLTA (TÚNEL) ---
             // CONFIRA SE O LINK DA TELA PRETA MUDOU!
