@@ -1381,7 +1381,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const modelIA = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 // --- ROTA DO WEBHOOK (CORRIGIDA: Aceita minúsculas) ---
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -1429,7 +1429,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
             // --- ENVIO DE VOLTA (TÚNEL) ---
             // CONFIRA SE O LINK DA TELA PRETA MUDOU!
-            const LINK_CLOUDFLARE = "https://dose-enquiry-subdivision-function.trycloudflare.com"; 
+            const LINK_CLOUDFLARE = "https://specifically-openings-complications-boring.trycloudflare.com"; 
 
             console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
             
