@@ -1400,16 +1400,14 @@ app.post('/webhook/whatsapp', async (req, res) => {
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // Mantemos o JID original (@lid)
+            const numeroRemetente = key.remoteJid; // JID original (ex: ...@lid)
             const fromMe = key.fromMe;
 
-            // Extração do texto recebido
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption || "";
 
-            // Ignora se for mensagem vazia ou enviada pelo próprio bot
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
             console.log(`[ZAP] Recebido de ${numeroRemetente}: "${textoRecebido}"`);
@@ -1417,7 +1415,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
             // --- IA GEMINI (MANTIDA 2.5 FLASH) ---
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
-            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda ao cliente: ${textoRecebido}`;
+            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
             
             try {
                 const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
@@ -1426,43 +1424,43 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
                 const resData = await responseIA.json();
-                if (resData.candidates && resData.candidates[0].content.parts[0].text) {
-                    respostaIA = resData.candidates[0].content.parts[0].text;
-                    console.log(`[IA] SUCESSO com Gemini 2.5 Flash!`);
-                }
-            } catch (err) { 
-                console.error("[IA] Erro Gemini:", err.message); 
-            }
+                if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
+            } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ENVIO DE VOLTA (TÚNEL DIRETO - VERSÃO SEM OPTIONS) ---
+            // --- ESTRATÉGIA DE ENVIO (TENTATIVA DUPLA) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
+            const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            console.log(`[IA] Enviando resposta silenciosa para ${numeroRemetente}...`);
-            
-            const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': 'sjs04ji5xlvzb0bujyx6b' 
-                },
-                body: JSON.stringify({
-                    number: numeroRemetente, // ID completo com @lid
-                    textMessage: { 
-                        text: respostaIA || "Olá! Como posso ajudar? 💈" 
-                    }
-                    // IMPORTANTE: Removemos o bloco 'options' para tentar pular a verificação de contato
-                })
-            });
+            const enviarMensagem = async (destino) => {
+                return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                    body: JSON.stringify({
+                        number: destino,
+                        textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
+                        options: { 
+                            delay: 1200, 
+                            presence: "composing",
+                            checkStatus: false // Tentativa de bypass via parâmetro
+                        }
+                    })
+                });
+            };
+
+            // TENTATIVA 1: Usando o JID original (@lid)
+            console.log(`[IA] Tentativa 1 (JID): Enviando para ${numeroRemetente}...`);
+            let respZap = await enviarMensagem(numeroRemetente);
+
+            // SE FALHAR (Erro 400), TENTATIVA 2: Usando apenas o número limpo
+            if (respZap.status === 400) {
+                const numeroLimpo = numeroRemetente.split('@')[0];
+                console.log(`[IA] Erro 400 no JID. Tentativa 2: Enviando para número limpo ${numeroLimpo}...`);
+                respZap = await enviarMensagem(numeroLimpo);
+            }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
-            if (respZap.status !== 201 && respZap.status !== 200) {
-                const erroTexto = await respZap.text();
-                console.error(`[IA] O robô recusou o envio: ${erroTexto}`);
-            }
         }
-        
         res.status(200).send('EVENT_RECEIVED');
-
     } catch (error) {
         console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado"); 
