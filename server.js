@@ -1430,14 +1430,20 @@ app.post('/webhook/whatsapp', async (req, res) => {
             // --- ENVIO DE VOLTA (TÚNEL ATUALIZADO) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
-            // --- PASSO OBRIGATÓRIO: DESATIVAR VERIFICAÇÃO DE NÚMERO ---
-            // Isso força o robô a aceitar o @lid sem perguntar se ele existe
-            await fetch(`${LINK_CLOUDFLARE}/settings/set/king_bot`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'apikey': 'sjs04ji5xlvzb0bujyx6b' },
-                body: JSON.stringify({ verifyContact: false })
-            });
+            // --- PASSO 1: DESATIVAR A VERIFICAÇÃO DE NÚMERO (O PULO DO GATO) ---
+            // Isso envia um comando para o seu robô local parar de checar se o número "existe"
+            try {
+                await fetch(`${LINK_CLOUDFLARE}/settings/set/king_bot`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', 'apikey': 'sjs04ji5xlvzb0bujyx6b' },
+                    body: JSON.stringify({ checkStatus: false }) 
+                });
+                console.log(`[IA] Verificação de número desativada para aceitar @lid.`);
+            } catch (e) {
+                console.warn("[IA] Não foi possível mudar settings, mas tentarei enviar...");
+            }
 
+            // --- PASSO 2: ENVIO DA MENSAGEM ---
             console.log(`[IA] Enviando para o WhatsApp via túnel...`);
             
             const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
@@ -1447,7 +1453,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
                     'apikey': 'sjs04ji5xlvzb0bujyx6b' 
                 },
                 body: JSON.stringify({
-                    number: numeroRemetente, // Usamos o JID original (@lid)
+                    number: numeroRemetente, // Mantemos o JID original (@lid)
                     textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
                     options: {
                         delay: 1200,
