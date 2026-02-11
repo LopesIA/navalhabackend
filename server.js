@@ -1392,15 +1392,16 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-app.post('/webhook/whatsapp', async (req, res) => {
+app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
+        console.log("[WEBHOOK] Requisição recebida!"); // Log para confirmar que bateu aqui
         const data = req.body;
         const evento = data.event; 
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // JID original (ex: ...@lid)
+            const numeroRemetente = key.remoteJid; // Usamos o JID original (@lid)
             const fromMe = key.fromMe;
 
             const textoRecebido = 
@@ -1409,8 +1410,6 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 mensagem.imageMessage?.caption || "";
 
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
-
-            console.log(`[ZAP] Recebido de ${numeroRemetente}: "${textoRecebido}"`);
 
             // --- IA GEMINI (MANTIDA 2.5 FLASH) ---
             let respostaIA = "";
@@ -1427,36 +1426,22 @@ app.post('/webhook/whatsapp', async (req, res) => {
                 if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
             } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ESTRATÉGIA DE ENVIO (TENTATIVA DUPLA) ---
+            // --- ENVIO DE VOLTA (TÚNEL DIRETO) ---
             const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
-            const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            const enviarMensagem = async (destino) => {
-                return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
-                    body: JSON.stringify({
-                        number: destino,
-                        textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" },
-                        options: { 
-                            delay: 1200, 
-                            presence: "composing",
-                            checkStatus: false // Tentativa de bypass via parâmetro
-                        }
-                    })
-                });
-            };
-
-            // TENTATIVA 1: Usando o JID original (@lid)
-            console.log(`[IA] Tentativa 1 (JID): Enviando para ${numeroRemetente}...`);
-            let respZap = await enviarMensagem(numeroRemetente);
-
-            // SE FALHAR (Erro 400), TENTATIVA 2: Usando apenas o número limpo
-            if (respZap.status === 400) {
-                const numeroLimpo = numeroRemetente.split('@')[0];
-                console.log(`[IA] Erro 400 no JID. Tentativa 2: Enviando para número limpo ${numeroLimpo}...`);
-                respZap = await enviarMensagem(numeroLimpo);
-            }
+            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
+            
+            const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': 'sjs04ji5xlvzb0bujyx6b' 
+                },
+                body: JSON.stringify({
+                    number: numeroRemetente, // Mantemos o ID completo com @lid
+                    textMessage: { text: respostaIA || "Opa! Já te respondo! 💈" }
+                })
+            });
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
         }
