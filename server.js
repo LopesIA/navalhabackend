@@ -1477,7 +1477,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
             }
 
             // --- ENVIO DE VOLTA (TÚNEL CLOUDFLARE) ---
-            const LINK_CLOUDFLARE = "https://specifically-openings-complications-boring.trycloudflare.com"; 
+            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
 
             console.log(`[IA] Enviando resposta via túnel...`);
             
