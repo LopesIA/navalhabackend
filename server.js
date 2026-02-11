@@ -1376,8 +1376,14 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
     }
 });
 
-// --- CONFIGURAÇÃO DA IA GEMINI ---
+const express = require('express'); // Adicionei essa linha caso falte
+const app = express();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+// --- ESSA LINHA É OBRIGATÓRIA PARA LER O WEBHOOK ---
+app.use(express.json()); 
+// --------------------------------------------------
+
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const modelIA = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
@@ -1386,41 +1392,58 @@ app.post('/webhook/whatsapp', async (req, res) => {
     try {
         const data = req.body;
         
-        // Verifica se chegou uma mensagem de texto
+        // Verifica se chegou uma mensagem (Evolution v1.8+)
+        // O evento principal costuma ser MESSAGES_UPSERT
         if (data.event === "MESSAGES_UPSERT") {
+            
+            // CAMINHO PARA ACESSAR A MENSAGEM NA EVOLUTION
             const mensagem = data.data.message;
+            if (!mensagem) return res.status(200).send('OK'); // Ignora se não tiver mensagem
+
             const textoRecebido = mensagem.conversation || mensagem.extendedTextMessage?.text;
             const numeroRemetente = data.data.key.remoteJid;
+            const fromMe = data.data.key.fromMe; // Verifica se fui eu que mandei
 
-            if (!textoRecebido) return res.status(200).send('OK');
+            // Ignora se não tiver texto ou se a mensagem for minha (para evitar loop)
+            if (!textoRecebido || fromMe) return res.status(200).send('OK');
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: ${textoRecebido}`);
 
-            // 1. A IA gera a resposta personalizada para a Barbearia
+            // 1. A IA gera a resposta personalizada
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável, direto e use emojis. Responda ao cliente: ${textoRecebido}`;
-            const result = await modelIA.generateContent(prompt);
-            const respostaIA = result.response.text();
+            
+            // Tratamento de erro simples na IA
+            let respostaIA = "";
+            try {
+                const result = await modelIA.generateContent(prompt);
+                respostaIA = result.response.text();
+            } catch (err) {
+                console.error("Erro na IA:", err);
+                respostaIA = "Desculpe, estou meio confuso agora. Pode repetir?";
+            }
 
-            // 2. Envia de volta para o seu computador através do túnel da Cloudflare
+            // 2. Envia de volta para o seu computador (Cloudflare)
+            // ATENÇÃO: Se fechar a janela preta do Cloudflare, ESSE LINK MUDA!
             const LINK_CLOUDFLARE = "https://dose-enquiry-subdivision-function.trycloudflare.com"; 
 
             await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // Sua chave da API Evolution
+                    'apikey': 'sjs04ji5xlvzb0bujyx6b' // <--- SUA CHAVE NOVA ESTÁ AQUI (CERTO!)
                 },
                 body: JSON.stringify({
                     number: numeroRemetente,
                     text: respostaIA
                 })
             });
-            console.log(`[IA] Resposta enviada com sucesso!`);
+            console.log(`[IA] Resposta enviada!`);
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
         console.error("Erro no Webhook:", error);
-        res.status(500).send("Erro");
+        // Mesmo com erro, respondemos 200 pro WhatsApp não ficar tentando reenviar
+        res.status(200).send("Erro processado"); 
     }
 });
 
