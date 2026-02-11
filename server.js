@@ -1376,13 +1376,8 @@ app.post('/admin/stats-financeiro', isAdmin, async (req, res) => {
     }
 });
 
-const express = require('express'); // Adicionei essa linha caso falte
-const app = express();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// --- ESSA LINHA É OBRIGATÓRIA PARA LER O WEBHOOK ---
-app.use(express.json()); 
-// --------------------------------------------------
 
 // Certifique-se de adicionar a variável GEMINI_API_KEY no painel do Render!
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
