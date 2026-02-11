@@ -1392,26 +1392,31 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
+// --- WEBHOOK CORRIGIDO (ROTA DUPLA + BYPASS DE VALIDAÇÃO) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
-        console.log("[WEBHOOK] Requisição recebida!"); // Log para confirmar que bateu aqui
+        console.log("[WEBHOOK] Requisição recebida!"); 
         const data = req.body;
         const evento = data.event; 
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; // Usamos o JID original (@lid)
+            const numeroRemetente = key.remoteJid; // O ID original (pode ser @lid ou @s.whatsapp.net)
             const fromMe = key.fromMe;
 
+            // Extração do texto
             const textoRecebido = 
                 mensagem.conversation || 
                 mensagem.extendedTextMessage?.text || 
                 mensagem.imageMessage?.caption || "";
 
+            // Ignora mensagens próprias ou vazias
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
-            // --- IA GEMINI (MANTIDA 2.5 FLASH) ---
+            console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
+
+            // --- IA GEMINI (2.5 FLASH) ---
             let respostaIA = "";
             const API_KEY = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
@@ -1426,26 +1431,42 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 if (resData.candidates) respostaIA = resData.candidates[0].content.parts[0].text;
             } catch (err) { console.error("[IA] Erro Gemini:", err.message); }
 
-            // --- ENVIO DE VOLTA (TÚNEL DIRETO) ---
-            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
+            // --- ESTRATÉGIA DE ENVIO (DUPLA TENTATIVA) ---
+            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com";
+            const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            console.log(`[IA] Enviando resposta para ${numeroRemetente}...`);
-            
-            const respZap = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'apikey': 'sjs04ji5xlvzb0bujyx6b' 
-                },
-                body: JSON.stringify({
-                    number: numeroRemetente, // Mantemos o ID completo com @lid
-                    textMessage: { text: respostaIA || "Opa! Já te respondo! 💈" }
-                })
-            });
+            // Função auxiliar que envia SEM 'options' para evitar a checagem de existência
+            const enviarMensagem = async (destino) => {
+                return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'apikey': API_KEY_EVO 
+                    },
+                    body: JSON.stringify({
+                        number: destino,
+                        textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
+                        // REMOVEMOS 'options' (delay/presence) propositalmente!
+                    })
+                });
+            };
+
+            // TENTATIVA 1: Envia para o ID original (ex: @lid)
+            console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
+            let respZap = await enviarMensagem(numeroRemetente);
+
+            // TENTATIVA 2: Se der erro 400 ou 404, tenta enviar apenas para os números
+            if (respZap.status === 400 || respZap.status === 404) {
+                const numeroLimpo = numeroRemetente.split('@')[0];
+                console.log(`[IA] Falha no JID (${respZap.status}). Tentativa 2: Enviando para número limpo ${numeroLimpo}...`);
+                respZap = await enviarMensagem(numeroLimpo);
+            }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
         }
+        
         res.status(200).send('EVENT_RECEIVED');
+
     } catch (error) {
         console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado"); 
