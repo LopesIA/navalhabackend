@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK BLINDADO (GEMINI 3 + DEBUG JSON + CORREÇÃO UNDEFINED) ---
+// --- WEBHOOK FINAL (CONSULTA REAL: BARBEIROS x AGENDAMENTOS) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1405,7 +1405,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // --- 🚨 FIX MIKAELA (SEU NÚMERO PERSONALIZADO) ---
+            // --- 🚨 FIX MIKAELA ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 numeroRemetente = "5527996598623@s.whatsapp.net"; 
             }
@@ -1419,16 +1419,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- FERRAMENTAS ---
+            // --- 🛠️ FERRAMENTAS INTELIGENTES ---
             const tools = [{
                 "function_declarations": [{
-                    "name": "consultar_disponibilidade",
-                    "description": "Verifica se existe agendamento confirmado em um determinado dia e horário.",
+                    "name": "consultar_disponibilidade_real",
+                    "description": "Verifica quais barbeiros estão livres em um dia e horário específicos, cruzando a agenda configurada com os agendamentos existentes.",
                     "parameters": {
                         "type": "OBJECT",
                         "properties": {
                             "data": { "type": "STRING", "description": "Data no formato YYYY-MM-DD" },
-                            "horario": { "type": "STRING", "description": "Horário no formato HH:MM" }
+                            "horario": { "type": "STRING", "description": "Horário no formato H:MM ou HH:MM (ex: 8:00, 14:30)" },
+                            "barbeiroPreferido": { "type": "STRING", "description": "Nome do barbeiro (opcional)" }
                         },
                         "required": ["data", "horario"]
                     }
@@ -1439,15 +1440,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const MODEL_NAME = "gemini-3-flash-preview";
 
             const systemInstruction = {
-                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Use a ferramenta 'consultar_disponibilidade' para ver se tem horário. Seja breve." }]
+                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Ao consultar horários, liste os profissionais disponíveis. Se o cliente não escolher um, pergunte a preferência." }]
             };
 
-            // Variável que vai guardar a resposta final
             let respostaFinal = "";
 
             try {
-                // 1️⃣ PRIMEIRA CHAMADA
-                console.log(`[IA] Pensando (Passo 1)...`);
+                // 1️⃣ PRIMEIRA CHAMADA (IA)
+                console.log(`[IA] Pensando...`);
                 const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1461,54 +1461,113 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 const data1 = await response1.json();
                 
                 if (!data1.candidates || !data1.candidates[0]) {
-                    respostaFinal = "Desculpe, estou meio confuso. Pode repetir?";
+                    respostaFinal = "Desculpe, não entendi.";
                 } else {
                     const part1 = data1.candidates[0].content.parts[0];
 
-                    // 2️⃣ VERIFICA SE CHAMOU FUNÇÃO
+                    // 2️⃣ EXECUÇÃO DA FUNÇÃO
                     if (part1.functionCall) {
                         const fnName = part1.functionCall.name;
                         const fnArgs = part1.functionCall.args;
-                        console.log(`[IA] Ferramenta acionada: ${fnName}`, fnArgs);
+                        console.log(`[IA] Consultando: ${fnArgs.data} às ${fnArgs.horario}`);
 
                         let functionResult = {};
-                        let fallbackMsg = ""; // Mensagem de emergência
+                        let fallbackMsg = "";
 
-                        // LÓGICA DO BANCO
-                        if (fnName === "consultar_disponibilidade") {
+                        if (fnName === "consultar_disponibilidade_real") {
                             try {
-                                const snapshot = await db.collection('agendamentos')
-                                    .where('data', '==', fnArgs.data)
-                                    .where('horario', '==', fnArgs.horario)
-                                    .where('status', '==', 'confirmado')
+                                // A. Formatar horário (garantir que 08:00 vire 8:00 se necessário, ou vice-versa, dependendo do seu banco)
+                                // No seu exemplo de 'usuarios', o campo é "8:00" (sem zero à esquerda) ou "10:00".
+                                // Vamos normalizar removendo o zero à esquerda da hora se for menor que 10
+                                let horarioBanco = fnArgs.horario;
+                                if (horarioBanco.startsWith("0") && horarioBanco.includes(":")) {
+                                    horarioBanco = horarioBanco.substring(1); // "08:00" vira "8:00"
+                                }
+
+                                console.log(`[DB] Buscando barbeiros que atendem às ${horarioBanco}...`);
+
+                                // B. Buscar Profissionais que atendem nesse horário (Coleção 'usuarios')
+                                const barbeirosSnap = await db.collection('usuarios')
+                                    .where('tipo', '==', 'barbeiro') // Filtra só barbeiros
+                                    // .where(`agenda.${horarioBanco}`, '==', true) // <-- ISSO É COMPLEXO NO FIRESTORE
+                                    // O Firestore não filtra bem campos aninhados dinâmicos (agenda.8:00).
+                                    // MELHOR ESTRATÉGIA: Pega todos os barbeiros e filtra no código (loop).
                                     .get();
 
-                                if (snapshot.empty) {
-                                    functionResult = { status: "LIVRE", obs: "Vago." };
-                                    fallbackMsg = `Verifiquei aqui e o horário de ${fnArgs.horario} está LIVRE! ✅ Gostaria de agendar?`;
+                                let barbeirosQueAtendem = [];
+                                barbeirosSnap.forEach(doc => {
+                                    const dados = doc.data();
+                                    // Verifica se na agenda dele esse horário é true
+                                    if (dados.agenda && dados.agenda[horarioBanco] === true) {
+                                        barbeirosQueAtendem.push({
+                                            uid: doc.id,
+                                            nome: dados.nome || "Profissional",
+                                            agenda: dados.agenda
+                                        });
+                                    }
+                                });
+
+                                if (barbeirosQueAtendem.length === 0) {
+                                    functionResult = { status: "FECHADO", obs: "Nenhum barbeiro atende neste horário." };
+                                    fallbackMsg = "Nesse horário a barbearia está fechada ou ninguém atende. 🔒";
                                 } else {
-                                    functionResult = { status: "OCUPADO", obs: "Reservado." };
-                                    fallbackMsg = `Poxa, o horário de ${fnArgs.horario} já está ocupado. ❌ Que tal outro?`;
+                                    // C. Verificar quem já está ocupado (Coleção 'agendamentos')
+                                    // Precisamos normalizar o horário para consulta no agendamento (lá costuma ser "08:00")
+                                    // Se no agendamento for "08:00" e na agenda "8:00", temos que cuidar disso.
+                                    // Vamos assumir que no 'agendamentos' o padrão é HH:MM (com zero).
+                                    
+                                    let horarioAgendamento = fnArgs.horario; 
+                                    if (!horarioAgendamento.startsWith("0") && horarioAgendamento.length === 4) {
+                                         horarioAgendamento = "0" + horarioAgendamento; // "8:00" vira "08:00"
+                                    }
+
+                                    const agendamentosSnap = await db.collection('agendamentos')
+                                        .where('data', '==', fnArgs.data)
+                                        .where('horario', '==', horarioAgendamento)
+                                        .where('status', 'in', ['confirmado', 'conclusão pendente']) 
+                                        .get();
+
+                                    const uidsOcupados = [];
+                                    agendamentosSnap.forEach(doc => {
+                                        const ag = doc.data();
+                                        if (ag.barbeiroUid) uidsOcupados.push(ag.barbeiroUid);
+                                    });
+
+                                    // D. Cruzamento Final (Quem atende - Quem tá ocupado)
+                                    const disponiveis = barbeirosQueAtendem.filter(b => !uidsOcupados.includes(b.uid));
+
+                                    if (disponiveis.length > 0) {
+                                        const nomesLivres = disponiveis.map(b => b.nome).join(", ");
+                                        functionResult = { 
+                                            status: "LIVRE", 
+                                            profissionais: nomesLivres, 
+                                            qtd: disponiveis.length 
+                                        };
+                                        fallbackMsg = `Tenho horário disponível às ${fnArgs.horario} com: ${nomesLivres}. ✂️ Qual você prefere?`;
+                                    } else {
+                                        functionResult = { status: "OCUPADO", obs: "Todos os profissionais deste horário estão cheios." };
+                                        fallbackMsg = `Poxa, às ${fnArgs.horario} todos os nossos barbeiros já estão ocupados. ❌`;
+                                    }
                                 }
+
                             } catch (dbError) {
-                                functionResult = { status: "ERRO", obs: "Falha BD." };
-                                fallbackMsg = "Tive um erro ao consultar a agenda.";
+                                console.error(dbError);
+                                functionResult = { status: "ERRO", obs: dbError.message };
+                                fallbackMsg = "Erro ao consultar disponibilidade.";
                             }
                         }
 
-                        console.log("[IA] Resultado do Banco:", functionResult);
+                        console.log("[IA] Resultado Real:", functionResult);
 
-                        // 3️⃣ SEGUNDA CHAMADA (COM PROTEÇÃO CONTRA UNDEFINED)
+                        // 3️⃣ SEGUNDA CHAMADA (IA GERA RESPOSTA)
                         try {
-                            console.log("[IA] Gerando resposta final (Passo 2)...");
-                            
                             const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     contents: [
                                         { role: "user", parts: [{ text: textoRecebido }] },
-                                        { role: "model", parts: [part1] }, // Mantém assinatura
+                                        { role: "model", parts: [part1] },
                                         {
                                             role: "function",
                                             parts: [{
@@ -1525,52 +1584,32 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                             const data2 = await response2.json();
 
-                            // LOG DE DEBUG PARA VER O QUE O GEMINI MANDOU
-                            console.log("[IA] JSON COMPLETO (Passo 2):", JSON.stringify(data2, null, 2));
-
-                            // VERIFICAÇÃO PROFUNDA PARA EVITAR 'UNDEFINED'
-                            if (data2.candidates && 
-                                data2.candidates[0] && 
-                                data2.candidates[0].content && 
-                                data2.candidates[0].content.parts && 
-                                data2.candidates[0].content.parts[0] &&
-                                data2.candidates[0].content.parts[0].text) {
-                                
+                            if (data2.candidates && data2.candidates[0] && data2.candidates[0].content) {
                                 respostaFinal = data2.candidates[0].content.parts[0].text;
-                                console.log("[IA] Resposta gerada com sucesso!");
-                                
                             } else {
-                                throw new Error("Campo de texto não encontrado no JSON da IA.");
+                                throw new Error("JSON IA inválido na volta.");
                             }
 
                         } catch (err2) {
-                            console.error("[IA] Falha na segunda chamada. Usando Fallback.", err2.message);
-                            // AQUI É O PULO DO GATO: Se a IA falhar ou mandar undefined, usamos a mensagem manual
+                            console.error("[IA] Fallback:", err2.message);
                             respostaFinal = fallbackMsg; 
                         }
 
                     } else {
-                        respostaFinal = part1.text || "Não entendi.";
+                        respostaFinal = part1.text || "Poderia repetir?";
                     }
                 }
-
             } catch (err) {
                 console.error("[IA] Erro Geral:", err);
-                respostaFinal = "Estou enfrentando problemas técnicos momentâneos.";
+                respostaFinal = "Erro técnico no servidor.";
             }
 
-            // --- 4️⃣ ENVIO FINAL ---
-            
-            // LINK CLOUDFLARE (CONFIRME SE AINDA É ESSE)
+            // --- 4️⃣ ENVIO ---
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            // Se ainda assim estiver vazio, coloca mensagem de erro genérica
-            if (!respostaFinal || respostaFinal === "undefined") {
-                respostaFinal = "Tive um erro interno ao processar sua solicitação.";
-            }
-
-            console.log(`[ZAP] Enviando resposta final: "${respostaFinal}"`);
+            // Fallback final de segurança
+            if (!respostaFinal || respostaFinal === "undefined") respostaFinal = "Erro ao processar sua solicitação.";
 
             const enviarMensagem = async (destino) => {
                 const body = {
@@ -1578,15 +1617,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     textMessage: { text: respostaFinal }
                 };
                 try {
-                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                         body: JSON.stringify(body)
                     });
-                    console.log(`[ZAP] Status envio: ${r.status}`);
-                } catch (e) {
-                    console.error("[ZAP] Erro ao enviar fetch:", e.message);
-                }
+                } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
             };
 
             await enviarMensagem(numeroRemetente);
