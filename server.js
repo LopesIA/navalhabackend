@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK ATUALIZADO (CHAVE NOVA + GEMINI 3) ---
+// --- WEBHOOK ATUALIZADO (CORREÇÃO V1BETA + CLOUDFLARE) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!"); 
@@ -1415,21 +1415,20 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- IA GEMINI (CONFIGURAÇÃO NOVA) ---
+            // --- IA GEMINI (CORREÇÃO DE VERSÃO) ---
             let respostaIA = "";
-            
-            // 🔑 SUA NOVA CHAVE AQUI:
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y"; 
             
-            // 🧠 O MODELO QUE VOCÊ DESCOBRIU:
-            // Se der erro de "Model not found", troque para "gemini-2.0-flash-exp" ou "gemini-1.5-flash"
+            // Se funciona no King Agenda, deve funcionar aqui com a rota v1beta
             const MODEL_NAME = "gemini-3-flash-preview"; 
             
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
             
             try {
-                console.log(`[IA] Solicitando ao ${MODEL_NAME}...`);
-                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                console.log(`[IA] Solicitando ao ${MODEL_NAME} via v1beta...`);
+                
+                // MUDANÇA CRÍTICA AQUI: Trocamos 'v1' por 'v1beta'
+                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
@@ -1437,18 +1436,19 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 
                 const resData = await responseIA.json();
                 
-                // Verificação de erro da API do Google
                 if (resData.error) {
                     console.error(`[IA] Erro na API do Google: ${resData.error.message}`);
-                    respostaIA = "Desculpe, estou atualizando meu sistema. Tente novamente em instantes.";
+                    respostaIA = "Desculpe, estou atualizando meu sistema de IA.";
                 } else if (resData.candidates) {
                     respostaIA = resData.candidates[0].content.parts[0].text;
                     console.log("[IA] Resposta gerada com sucesso!");
                 }
             } catch (err) { console.error("[IA] Erro de Conexão Gemini:", err.message); }
 
-            // --- ESTRATÉGIA DE ENVIO (TENTATIVA DUPLA ANTI-ERRO) ---
-            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com";
+            // --- TÚNEL CLOUDFLARE ---
+            // ⚠️ IMPORTANTE: COLE O LINK NOVO QUE VOCÊ GEROU NO CMD AQUI EMBAIXO 👇
+            const LINK_CLOUDFLARE = "https://COLE-SEU-LINK-NOVO-AQUI.trycloudflare.com"; 
+            
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
@@ -1465,26 +1465,19 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 });
             };
 
-            // TENTATIVA 1: ID Original (@lid ou @s.whatsapp.net)
+            // TENTATIVA 1: ID Original
             console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
             let respZap = await enviarMensagem(numeroRemetente);
 
-            // TENTATIVA 2: Se falhar, FORÇA o formato antigo (@s.whatsapp.net)
-            // Isso salva se o número vier errado do PC
+            // TENTATIVA 2: Se falhar, força @s.whatsapp.net
             if (respZap.status !== 201) {
                 const numeroLimpo = numeroRemetente.split('@')[0];
                 const idAntigo = `${numeroLimpo}@s.whatsapp.net`; 
-                
                 console.log(`[IA] Erro (${respZap.status}). Tentativa 2 forçada para: ${idAntigo}`);
                 respZap = await enviarMensagem(idAntigo);
             }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
-            
-            if (respZap.status !== 201) {
-                const erroMsg = await respZap.text();
-                console.error(`[IA] Motivo do erro: ${erroMsg}`);
-            }
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
