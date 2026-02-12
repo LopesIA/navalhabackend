@@ -1447,7 +1447,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             // --- TÚNEL CLOUDFLARE ---
             // ⚠️ IMPORTANTE: COLE O LINK NOVO QUE VOCÊ GEROU NO CMD AQUI EMBAIXO 👇
-            const LINK_CLOUDFLARE = "https://COLE-SEU-LINK-NOVO-AQUI.trycloudflare.com"; 
+            const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
