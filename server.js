@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK ATUALIZADO (GEMINI 3 + CONSULTA AGENDAMENTO + FIX ERROS) ---
+// --- WEBHOOK CORRIGIDO (GEMINI 3 + THOUGHT SIGNATURE FIX) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1405,13 +1405,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // --- 🚨 FIX MIKAELA (MANTIDO) ---
+            // --- 🚨 FIX MIKAELA ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-                // Trocando para o formato que funcionou (sem o 9)
                 numeroRemetente = "552796072318@s.whatsapp.net"; 
             }
 
-            // Extração do texto
             const textoRecebido =
                 mensagem.conversation ||
                 mensagem.extendedTextMessage?.text ||
@@ -1421,39 +1419,33 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- 1. DEFINIÇÃO DAS FERRAMENTAS (O QUE A IA PODE FAZER) ---
-            const tools = [
-                {
-                    "function_declarations": [
-                        {
-                            "name": "consultar_disponibilidade",
-                            "description": "Verifica se existe agendamento confirmado em um determinado dia e horário.",
-                            "parameters": {
-                                "type": "OBJECT",
-                                "properties": {
-                                    "data": { "type": "STRING", "description": "Data no formato YYYY-MM-DD" },
-                                    "horario": { "type": "STRING", "description": "Horário no formato HH:MM" }
-                                },
-                                "required": ["data", "horario"]
-                            }
-                        }
-                    ]
-                }
-            ];
+            // --- DEFINIÇÃO DAS FERRAMENTAS ---
+            const tools = [{
+                "function_declarations": [{
+                    "name": "consultar_disponibilidade",
+                    "description": "Verifica se existe agendamento confirmado em um determinado dia e horário.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "data": { "type": "STRING", "description": "Data no formato YYYY-MM-DD" },
+                            "horario": { "type": "STRING", "description": "Horário no formato HH:MM" }
+                        },
+                        "required": ["data", "horario"]
+                    }
+                }]
+            }];
 
-            // --- 2. CONFIGURAÇÃO IA ---
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y";
             const MODEL_NAME = "gemini-3-flash-preview";
 
-            // Instruções do Sistema
             const systemInstruction = {
-                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Se o cliente perguntar se tem horário, use a ferramenta 'consultar_disponibilidade' antes de responder. Se estiver livre, diga que está disponível. Se estiver ocupado, diga que já tem gente. Seja breve." }]
+                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Se o cliente perguntar se tem horário, use a ferramenta 'consultar_disponibilidade'. Seja breve." }]
             };
 
             let respostaFinal = "";
 
             try {
-                // PRIMEIRA CHAMADA: Texto + Ferramentas
+                // PRIMEIRA CHAMADA
                 console.log(`[IA] Pensando...`);
                 const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
@@ -1467,22 +1459,22 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                 const data1 = await response1.json();
                 
-                // Proteção básica se a IA falhar na primeira
                 if (!data1.candidates || !data1.candidates[0]) {
                     console.error("[IA] Erro na primeira resposta:", JSON.stringify(data1));
-                    respostaFinal = "Desculpe, estou meio confuso agora.";
+                    respostaFinal = "Erro técnico na IA.";
                 } else {
-                    const part1 = data1.candidates[0].content.parts[0];
+                    // PEGAMOS O OBJETO COMPLETO AQUI (COM A ASSINATURA)
+                    const part1 = data1.candidates[0].content.parts[0]; 
 
-                    // --- 3. VERIFICA SE A IA CHAMOU FUNÇÃO ---
-                    if (part1 && part1.functionCall) {
+                    // --- VERIFICA SE A IA CHAMOU FUNÇÃO ---
+                    if (part1.functionCall) {
                         const fnName = part1.functionCall.name;
                         const fnArgs = part1.functionCall.args;
                         console.log(`[IA] Decidiu usar a ferramenta: ${fnName}`, fnArgs);
 
                         let functionResult = {};
 
-                        // EXECUTA A LÓGICA DO BANCO DE DADOS
+                        // CONSULTA BANCO
                         if (fnName === "consultar_disponibilidade") {
                             try {
                                 const snapshot = await db.collection('agendamentos')
@@ -1492,32 +1484,32 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     .get();
 
                                 if (snapshot.empty) {
-                                    functionResult = { status: "LIVRE", obs: "Nenhum agendamento encontrado." };
+                                    functionResult = { status: "LIVRE", obs: "Horário vago." };
                                 } else {
-                                    functionResult = { status: "OCUPADO", obs: "Horário reservado." };
+                                    functionResult = { status: "OCUPADO", obs: "Já reservado." };
                                 }
                             } catch (dbError) {
-                                console.error("[DB] Erro:", dbError);
-                                functionResult = { status: "ERRO", obs: "Falha ao ler banco." };
+                                functionResult = { status: "ERRO", obs: "Falha no banco." };
                             }
                         }
 
                         console.log("[IA] Resultado do Banco:", functionResult);
 
-                        // SEGUNDA CHAMADA: Devolve o resultado para a IA
+                        // SEGUNDA CHAMADA (CORRIGIDA)
+                        // Enviamos 'part1' inteiro, sem criar um novo objeto. Isso preserva a assinatura.
                         const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 contents: [
                                     { role: "user", parts: [{ text: textoRecebido }] },
-                                    { role: "model", parts: [{ functionCall: part1.functionCall }] },
+                                    { role: "model", parts: [part1] }, // <--- AQUI ESTÁ A CORREÇÃO MÁGICA
                                     {
                                         role: "function",
                                         parts: [{
                                             functionResponse: {
                                                 name: fnName,
-                                                response: { content: functionResult } // Formato corrigido
+                                                response: { name: fnName, content: functionResult }
                                             }
                                         }]
                                     }
@@ -1528,39 +1520,34 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                         const data2 = await response2.json();
 
-                        // --- PROTEÇÃO CONTRA CRASH (O FIX PRINCIPAL) ---
                         if (data2.candidates && data2.candidates.length > 0) {
                             respostaFinal = data2.candidates[0].content.parts[0].text;
                         } else {
-                            console.error("[IA] Erro na Resposta Final (JSON):", JSON.stringify(data2, null, 2));
-                            // Se a IA falhar na formatação, damos uma resposta manual baseada no banco
-                            if (functionResult.status === "LIVRE") respostaFinal = "Verifiquei aqui e o horário está livre! ✅";
-                            else if (functionResult.status === "OCUPADO") respostaFinal = "Poxa, esse horário já está ocupado. ❌";
-                            else respostaFinal = "Tive um erro técnico ao consultar.";
+                            console.error("[IA] Erro JSON Final:", JSON.stringify(data2, null, 2));
+                            // Fallback manual se a IA falhar de novo
+                            if(functionResult.status === "LIVRE") respostaFinal = "Verifiquei aqui e está livre! ✅";
+                            else respostaFinal = "Poxa, esse horário já está ocupado. ❌";
                         }
-
                     } else {
-                        // Se não chamou função, é só texto normal
-                        respostaFinal = part1?.text || "Desculpe, não entendi.";
+                        respostaFinal = part1.text || "Desculpe, não entendi.";
                     }
                 }
 
             } catch (err) {
                 console.error("[IA] Erro Geral:", err);
-                respostaFinal = "Estou com uma pequena falha técnica.";
+                respostaFinal = "Falha técnica.";
             }
 
-            // --- ENVIO (MANTIDO SEU LINK ATUAL) ---
+            // --- ENVIO ---
+            // LINK CLOUDFLARE (SEU LINK ATUAL)
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    // Sem options para evitar validação de número
                     textMessage: { text: respostaFinal }
                 };
-
                 return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
