@@ -1392,80 +1392,147 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (GEMINI 3 + CORREÇÃO MIKAELA) ---
+// --- WEBHOOK AVANÇADO (GEMINI 3 + FUNCTION CALLING) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
-        console.log("[WEBHOOK] Requisição recebida!"); 
+        console.log("[WEBHOOK] Requisição recebida!");
         const data = req.body;
-        const evento = data.event; 
+        const evento = data.event;
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            let numeroRemetente = key.remoteJid; 
+            let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // --- 🚨 FIX MIKAELA (Troca ID do PC pelo Celular) ---
+            // --- FIX MIKAELA (MANTIDO) ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-                console.log(`[FIX] Detectado ID de PC da Mikaela. Trocando para celular real...`);
-                numeroRemetente = "5527996598623@s.whatsapp.net";
+                numeroRemetente = "552796072318@s.whatsapp.net"; // O formato que funcionou (sem o 9)
             }
-            // ----------------------------------------------------
 
-            // Extração do texto
-            const textoRecebido = 
-                mensagem.conversation || 
-                mensagem.extendedTextMessage?.text || 
+            const textoRecebido =
+                mensagem.conversation ||
+                mensagem.extendedTextMessage?.text ||
                 mensagem.imageMessage?.caption || "";
 
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- IA GEMINI (GEMINI 3 NA V1BETA) ---
-            let respostaIA = "";
-            const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y"; 
-            
-            // Modelo Gemini 3 (Requer v1beta)
-            const MODEL_NAME = "gemini-3-flash-preview"; 
-            
-            const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
-            
+            // --- 1. DEFINIÇÃO DAS FERRAMENTAS (O QUE A IA PODE FAZER) ---
+            const tools = [
+                {
+                    "function_declarations": [
+                        {
+                            "name": "consultar_disponibilidade",
+                            "description": "Verifica se existe agendamento confirmado em um determinado dia e horário.",
+                            "parameters": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "data": { "type": "STRING", "description": "Data no formato YYYY-MM-DD" },
+                                    "horario": { "type": "STRING", "description": "Horário no formato HH:MM" }
+                                },
+                                "required": ["data", "horario"]
+                            }
+                        }
+                    ]
+                }
+            ];
+
+            // --- 2. PREPARAÇÃO DA IA ---
+            const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y";
+            const MODEL_NAME = "gemini-3-flash-preview";
+
+            // Prompt do Sistema (Instruções)
+            const systemInstruction = {
+                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Se o cliente perguntar se tem horário, use a ferramenta 'consultar_disponibilidade' antes de responder. Seja breve." }]
+            };
+
+            let respostaFinal = "";
+
             try {
-                console.log(`[IA] Solicitando ao ${MODEL_NAME} via v1beta...`);
-                
-                // USANDO A ROTA v1beta PARA ACEITAR O GEMINI 3
-                const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                // PRIMEIRA CHAMADA: Manda o texto do usuário + Ferramentas
+                console.log(`[IA] Pensando...`);
+                const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: textoRecebido }] }],
+                        tools: tools,
+                        system_instruction: systemInstruction
+                    })
                 });
-                
-                const resData = await responseIA.json();
-                
-                if (resData.error) {
-                    console.error(`[IA] Erro na API do Google: ${resData.error.message}`);
-                    respostaIA = "Desculpe, estou atualizando meu sistema de IA.";
-                } else if (resData.candidates) {
-                    respostaIA = resData.candidates[0].content.parts[0].text;
-                    console.log("[IA] Resposta gerada com sucesso!");
-                }
-            } catch (err) { console.error("[IA] Erro de Conexão Gemini:", err.message); }
 
-            // --- ENVIO (LINK DO TUNEL + SEM VALIDAÇÃO) ---
-            
-            // ⚠️ COLE SEU LINK NOVO AQUI EMBAIXO 👇
-            const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
-            
+                const data1 = await response1.json();
+                const part1 = data1.candidates?.[0]?.content?.parts?.[0];
+
+                // --- 3. A MÁGICA: VERIFICA SE A IA QUER USAR UMA FERRAMENTA ---
+                if (part1 && part1.functionCall) {
+                    const fnName = part1.functionCall.name;
+                    const fnArgs = part1.functionCall.args;
+                    console.log(`[IA] Decidiu usar a ferramenta: ${fnName}`, fnArgs);
+
+                    let functionResult = {};
+
+                    // EXECUTA A LÓGICA DO BANCO DE DADOS
+                    if (fnName === "consultar_disponibilidade") {
+                        // Busca no Firestore
+                        const snapshot = await db.collection('agendamentos')
+                            .where('data', '==', fnArgs.data)
+                            .where('horario', '==', fnArgs.horario)
+                            .where('status', '==', 'confirmado') // Só olha confirmados
+                            .get();
+
+                        if (snapshot.empty) {
+                            functionResult = { resultado: "LIVRE", mensagem: "Não existe agendamento neste horário." };
+                        } else {
+                            functionResult = { resultado: "OCUPADO", mensagem: "Já existe um cliente agendado neste horário." };
+                        }
+                    }
+
+                    // SEGUNDA CHAMADA: Devolve o resultado do banco para a IA gerar a resposta
+                    const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [
+                                { role: "user", parts: [{ text: textoRecebido }] },
+                                { role: "model", parts: [{ functionCall: part1.functionCall }] }, // O que a IA pediu
+                                {
+                                    role: "function", parts: [{
+                                        functionResponse: {
+                                            name: fnName,
+                                            response: { content: functionResult }
+                                        }
+                                    }]
+                                } // O que o banco respondeu
+                            ],
+                            tools: tools
+                        })
+                    });
+
+                    const data2 = await response2.json();
+                    respostaFinal = data2.candidates[0].content.parts[0].text;
+
+                } else {
+                    // Se não chamou função, é só papo furado
+                    respostaFinal = part1?.text || "Desculpe, não entendi.";
+                }
+
+            } catch (err) {
+                console.error("[IA] Erro:", err);
+                respostaFinal = "Estou com uma pequena falha técnica, chame o humano!";
+            }
+
+            // --- ENVIO (MANTIDO IGUAL) ---
+            const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; // SEU LINK
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    // SEM 'options' (delay/presence) PARA EVITAR ERRO DE VALIDAÇÃO
-                    textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
+                    textMessage: { text: respostaFinal }
                 };
-
                 return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
@@ -1473,21 +1540,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 });
             };
 
-            // TENTATIVA ÚNICA (JÁ CORRIGIDA NO INÍCIO)
-            console.log(`[IA] Enviando para ${numeroRemetente}...`);
-            let respZap = await enviarMensagem(numeroRemetente);
-
-            console.log(`[IA] Status final do envio: ${respZap.status}`);
-            
-            if (respZap.status !== 201) {
-                const erroMsg = await respZap.text();
-                console.error(`[IA] Motivo do erro: ${erroMsg}`);
-            }
+            await enviarMensagem(numeroRemetente);
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
         console.error("Erro no Webhook:", error);
-        res.status(200).send("Erro processado"); 
+        res.status(200).send("Erro processado");
     }
 });
 
