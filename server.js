@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK BLINDADO (GEMINI 3 + RESPOSTA GARANTIDA) ---
+// --- WEBHOOK BLINDADO (GEMINI 3 + DEBUG JSON + CORREÇÃO UNDEFINED) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1405,7 +1405,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // --- 🚨 FIX MIKAELA ---
+            // --- 🚨 FIX MIKAELA (SEU NÚMERO PERSONALIZADO) ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 numeroRemetente = "5527996598623@s.whatsapp.net"; 
             }
@@ -1498,7 +1498,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                         console.log("[IA] Resultado do Banco:", functionResult);
 
-                        // 3️⃣ SEGUNDA CHAMADA (COM PROTEÇÃO TOTAL)
+                        // 3️⃣ SEGUNDA CHAMADA (COM PROTEÇÃO CONTRA UNDEFINED)
                         try {
                             console.log("[IA] Gerando resposta final (Passo 2)...");
                             
@@ -1525,16 +1525,27 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                             const data2 = await response2.json();
 
-                            if (data2.candidates && data2.candidates[0]) {
+                            // LOG DE DEBUG PARA VER O QUE O GEMINI MANDOU
+                            console.log("[IA] JSON COMPLETO (Passo 2):", JSON.stringify(data2, null, 2));
+
+                            // VERIFICAÇÃO PROFUNDA PARA EVITAR 'UNDEFINED'
+                            if (data2.candidates && 
+                                data2.candidates[0] && 
+                                data2.candidates[0].content && 
+                                data2.candidates[0].content.parts && 
+                                data2.candidates[0].content.parts[0] &&
+                                data2.candidates[0].content.parts[0].text) {
+                                
                                 respostaFinal = data2.candidates[0].content.parts[0].text;
                                 console.log("[IA] Resposta gerada com sucesso!");
+                                
                             } else {
-                                throw new Error("IA não retornou texto na segunda volta.");
+                                throw new Error("Campo de texto não encontrado no JSON da IA.");
                             }
 
                         } catch (err2) {
                             console.error("[IA] Falha na segunda chamada. Usando Fallback.", err2.message);
-                            // AQUI É O PULO DO GATO: Se a IA falhar, usamos a mensagem manual
+                            // AQUI É O PULO DO GATO: Se a IA falhar ou mandar undefined, usamos a mensagem manual
                             respostaFinal = fallbackMsg; 
                         }
 
@@ -1548,20 +1559,24 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 respostaFinal = "Estou enfrentando problemas técnicos momentâneos.";
             }
 
-            // --- 4️⃣ ENVIO FINAL (O QUE ESTAVA FALTANDO) ---
+            // --- 4️⃣ ENVIO FINAL ---
             
-            // VERIFIQUE SE O LINK DO TUNEL AINDA É ESSE:
+            // LINK CLOUDFLARE (CONFIRME SE AINDA É ESSE)
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
+
+            // Se ainda assim estiver vazio, coloca mensagem de erro genérica
+            if (!respostaFinal || respostaFinal === "undefined") {
+                respostaFinal = "Tive um erro interno ao processar sua solicitação.";
+            }
 
             console.log(`[ZAP] Enviando resposta final: "${respostaFinal}"`);
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    textMessage: { text: respostaFinal || "Erro ao gerar resposta." }
+                    textMessage: { text: respostaFinal }
                 };
-                // Adicionei um try/catch aqui também para garantir o log
                 try {
                     const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                         method: 'POST',
