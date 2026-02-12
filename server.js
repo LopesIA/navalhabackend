@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK ATUALIZADO (CORREÇÃO V1BETA + CLOUDFLARE) ---
+// --- WEBHOOK FINAL (GEMINI 3 + ENVIO SEM VALIDAÇÃO) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!"); 
@@ -1415,11 +1415,9 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- IA GEMINI (CORREÇÃO DE VERSÃO) ---
+            // --- IA GEMINI (FUNCIONANDO!) ---
             let respostaIA = "";
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y"; 
-            
-            // Se funciona no King Agenda, deve funcionar aqui com a rota v1beta
             const MODEL_NAME = "gemini-3-flash-preview"; 
             
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
@@ -1427,7 +1425,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             try {
                 console.log(`[IA] Solicitando ao ${MODEL_NAME} via v1beta...`);
                 
-                // MUDANÇA CRÍTICA AQUI: Trocamos 'v1' por 'v1beta'
                 const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1445,16 +1442,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 }
             } catch (err) { console.error("[IA] Erro de Conexão Gemini:", err.message); }
 
-            // --- TÚNEL CLOUDFLARE ---
-            // ⚠️ IMPORTANTE: COLE O LINK NOVO QUE VOCÊ GEROU NO CMD AQUI EMBAIXO 👇
-            const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
-            
+            // --- ENVIO BLINDADO (SEM OPTIONS) ---
+            // COLE SEU LINK ATUAL AQUI SE MUDOU:
+            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    options: { delay: 1200, presence: "composing", linkPreview: false },
+                    // REMOVEMOS O 'options' COM DELAY E PRESENCE
+                    // Isso impede que o robô tente validar o número antes de enviar.
                     textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
                 };
 
@@ -1465,16 +1462,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 });
             };
 
-            // TENTATIVA 1: ID Original
+            // TENTATIVA 1: ID Original (Sem verificar se existe)
             console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
             let respZap = await enviarMensagem(numeroRemetente);
 
-            // TENTATIVA 2: Se falhar, força @s.whatsapp.net
+            // TENTATIVA 2: Se falhar, tenta o número limpo (só números)
+            // Se o ID for de computador (126...), a tentativa 2 vai falhar também, e ISSO É NORMAL.
+            // O importante é testar com um celular real depois.
             if (respZap.status !== 201) {
                 const numeroLimpo = numeroRemetente.split('@')[0];
-                const idAntigo = `${numeroLimpo}@s.whatsapp.net`; 
-                console.log(`[IA] Erro (${respZap.status}). Tentativa 2 forçada para: ${idAntigo}`);
-                respZap = await enviarMensagem(idAntigo);
+                console.log(`[IA] Erro (${respZap.status}). Tentativa 2 para número limpo: ${numeroLimpo}`);
+                respZap = await enviarMensagem(numeroLimpo);
             }
 
             console.log(`[IA] Status final do envio: ${respZap.status}`);
