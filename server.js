@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (PREÇO DINÂMICO + PROPRIETÁRIO + AGENDAMENTO) ---
+// --- WEBHOOK FINAL (MEMÓRIA SEGURA 15 MSG + KING AGENDA) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1418,13 +1418,43 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
+            const remoteJidLimpo = numeroRemetente.split('@')[0];
 
-            // --- 🛠️ FERRAMENTAS ---
+            // ============================================================
+            // 🧠 GESTÃO DE MEMÓRIA SEGURA (15 MENSAGENS)
+            // ============================================================
+            
+            // 👇 AQUI ESTÁ A SEGURANÇA: APENAS 15 MENSAGENS
+            const limitHistorico = 15; 
+            
+            const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
+
+            // 1. Salva a mensagem atual
+            await chatRef.add({
+                role: 'user',
+                parts: [{ text: textoRecebido }],
+                ts: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            // 2. Busca o histórico (Consome apenas 15 leituras)
+            const historySnap = await chatRef.orderBy('ts', 'desc').limit(limitHistorico).get();
+            let historicoParaIA = [];
+            
+            historySnap.forEach(doc => {
+                const msg = doc.data();
+                if (msg.role && msg.parts) {
+                    historicoParaIA.unshift({ role: msg.role, parts: msg.parts });
+                }
+            });
+
+            // ============================================================
+            
+            // --- FERRAMENTAS ---
             const tools = [{
                 "function_declarations": [
                     {
                         "name": "consultar_disponibilidade",
-                        "description": "Verifica disponibilidade. Use ANTES de agendar.",
+                        "description": "Verifica disponibilidade.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
@@ -1436,7 +1466,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     },
                     {
                         "name": "criar_agendamento",
-                        "description": "Cria o agendamento no banco. Requer confirmação total do cliente.",
+                        "description": "Cria agendamento no banco.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
@@ -1444,7 +1474,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
                                 "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
                                 "horario": { "type": "STRING", "description": "Horário HH:MM" },
-                                "servico": { "type": "STRING", "description": "Nome do serviço (ex: Corte, Barba)" }
+                                "servico": { "type": "STRING", "description": "Nome do serviço" }
                             },
                             "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
                         }
@@ -1456,22 +1486,23 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const MODEL_NAME = "gemini-3-flash-preview";
 
             const systemInstruction = {
-                parts: [{ text: `Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                1. Consulte disponibilidade antes de agendar.
-                2. Para agendar, obtenha: Barbeiro, Cliente, Data, Hora e Serviço.
-                3. Confirme os dados com o cliente antes de chamar 'criar_agendamento'.` }]
+                parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+                1. Use a memória da conversa para não perguntar coisas repetidas.
+                2. Consulte disponibilidade antes de agendar.
+                3. Para agendar, obtenha: Barbeiro, Cliente, Data, Hora e Serviço.` }]
             };
 
             let respostaFinal = "";
 
             try {
-                // 1️⃣ PRIMEIRA CHAMADA
-                console.log(`[IA] Pensando...`);
+                // 1️⃣ PRIMEIRA CHAMADA (COM HISTÓRICO)
+                console.log(`[IA] Pensando com contexto de ${historicoParaIA.length} mensagens...`);
+                
                 const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        contents: [{ parts: [{ text: textoRecebido }] }],
+                        contents: historicoParaIA, 
                         tools: tools,
                         system_instruction: systemInstruction
                     })
@@ -1480,11 +1511,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 const data1 = await response1.json();
                 
                 if (!data1.candidates || !data1.candidates[0]) {
-                    respostaFinal = "Não entendi, pode repetir?";
+                    respostaFinal = "Tive um lapso de memória. Pode repetir?";
                 } else {
                     const part1 = data1.candidates[0].content.parts[0];
 
-                    // 2️⃣ EXECUÇÃO DE FERRAMENTAS
                     if (part1.functionCall) {
                         const fnName = part1.functionCall.name;
                         const fnArgs = part1.functionCall.args;
@@ -1493,18 +1523,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let functionResult = {};
                         let fallbackMsg = "";
 
-                        // === FERRAMENTA 1: CONSULTAR ===
+                        // === CONSULTAR ===
                         if (fnName === "consultar_disponibilidade") {
-                            if (!fnArgs.horario || fnArgs.horario === "undefined") {
+                             if (!fnArgs.horario || fnArgs.horario === "undefined") {
                                 functionResult = { erro: "Horário ausente." };
-                                fallbackMsg = "Qual horário você gostaria de verificar?";
+                                fallbackMsg = "Qual horário você quer verificar?";
                             } else {
                                 try {
-                                    // Normaliza Horário
                                     let horarioBusca = fnArgs.horario;
                                     if (horarioBusca.startsWith("0") && horarioBusca.length === 5) horarioBusca = horarioBusca.substring(1);
 
-                                    // Busca Barbeiros
                                     const usuariosSnap = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
                                     let barbeirosAtendem = [];
                                     usuariosSnap.forEach(doc => {
@@ -1512,7 +1540,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         if (d.agenda && d.agenda[horarioBusca] === true) barbeirosAtendem.push({ uid: doc.id, nome: d.nome });
                                     });
 
-                                    // Busca Ocupados
                                     let horarioAg = fnArgs.horario;
                                     if (!horarioAg.startsWith("0") && horarioAg.length === 4) horarioAg = "0" + horarioAg;
 
@@ -1527,21 +1554,19 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                     if (livres.length > 0) {
                                         functionResult = { status: "LIVRE", profissionais: livres.map(b => b.nome).join(", ") };
-                                        fallbackMsg = `Tenho horário livre às ${fnArgs.horario} com: ${functionResult.profissionais}.`;
+                                        fallbackMsg = `Livre às ${fnArgs.horario} com: ${functionResult.profissionais}.`;
                                     } else {
                                         functionResult = { status: "OCUPADO" };
-                                        fallbackMsg = `Todos ocupados às ${fnArgs.horario}.`;
+                                        fallbackMsg = `Lotado às ${fnArgs.horario}.`;
                                     }
-                                } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao consultar."; }
+                                } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
                             }
                         }
 
-                        // === FERRAMENTA 2: CRIAR AGENDAMENTO (COM PREÇO DO PROPRIETÁRIO) ===
+                        // === AGENDAR ===
                         else if (fnName === "criar_agendamento") {
                             try {
-                                console.log(`[DB] Iniciando agendamento para ${fnArgs.clienteNome}...`);
-
-                                // A. Buscar Barbeiro (UID e Comissão)
+                                console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
                                 const allBarbeiros = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1550,65 +1575,39 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     const d = doc.data();
                                     const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                     if (nomeBanco.includes(nomeBusca)) {
-                                        barbeiroEncontrado = { 
-                                            uid: doc.id, 
-                                            nome: d.nome,
-                                            percentual: d.percentualComissao || 50 // Pega do barbeiro ou usa 50%
-                                        };
+                                        barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50 };
                                     }
                                 });
 
                                 if (!barbeiroEncontrado) {
                                     functionResult = { erro: "Barbeiro não encontrado." };
-                                    fallbackMsg = `Não achei o barbeiro "${fnArgs.barbeiroNome}". Verifique o nome.`;
+                                    fallbackMsg = `Não achei o barbeiro "${fnArgs.barbeiroNome}".`;
                                 } else {
-                                    // B. Buscar Proprietário para pegar Preço do Serviço
-                                    console.log("[DB] Buscando tabela de preços do Proprietário...");
-                                    const ownerSnap = await db.collection('usuarios')
-                                        .where('isProprietario', '==', true)
-                                        .limit(1)
-                                        .get();
-
-                                    let valorServico = 40; // Valor de segurança
+                                    const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                                    let valorServico = 40; 
                                     let nomeServicoOficial = fnArgs.servico;
 
                                     if (!ownerSnap.empty) {
                                         const ownerData = ownerSnap.docs[0].data();
-                                        const listaServicos = ownerData.listaServicos || [];
-                                        
-                                        // Procura o serviço na lista (busca aproximada)
-                                        const servicoBusca = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        
-                                        // Assumindo que listaServicos é array de objetos { nome: "Corte", valor: 35 }
-                                        // Se for array de strings, a lógica muda, mas o padrão é objeto.
-                                        const servicoAchado = listaServicos.find(s => {
-                                            const sNome = (s.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                            return sNome.includes(servicoBusca);
-                                        });
-
-                                        if (servicoAchado && servicoAchado.valor) {
-                                            valorServico = Number(servicoAchado.valor);
-                                            nomeServicoOficial = servicoAchado.nome;
-                                            console.log(`[DB] Preço encontrado: R$ ${valorServico} (${nomeServicoOficial})`);
-                                        } else {
-                                            console.log("[DB] Serviço não encontrado na lista do dono. Usando padrão R$ 40.");
+                                        const lista = ownerData.listaServicos || [];
+                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        const achado = lista.find(s => (s.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico));
+                                        if (achado && achado.valor) {
+                                            valorServico = Number(achado.valor);
+                                            nomeServicoOficial = achado.nome;
                                         }
                                     }
 
-                                    // C. Calcular Comissão
                                     const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
-
-                                    // D. Normalizar Horário
                                     let horaFinal = fnArgs.horario;
                                     if (!horaFinal.startsWith("0") && horaFinal.length === 4) horaFinal = "0" + horaFinal;
 
-                                    // E. Salvar no Firestore
-                                    const novoAgendamento = {
+                                    await db.collection('agendamentos').add({
                                         barbeiroUid: barbeiroEncontrado.uid,
                                         barbeiroNome: barbeiroEncontrado.nome,
                                         clienteNome: fnArgs.clienteNome,
-                                        clienteTelefone: numeroRemetente.split('@')[0],
-                                        clienteUid: "whatsapp_guest", // Ou busca se o cliente existir
+                                        clienteTelefone: remoteJidLimpo,
+                                        clienteUid: "whatsapp_guest",
                                         data: fnArgs.data,
                                         horario: horaFinal,
                                         servico: nomeServicoOficial,
@@ -1621,23 +1620,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         visualizado: false,
                                         comissaoCalculada: comissao,
                                         percentualComissao: barbeiroEncontrado.percentual,
-                                        metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 } // Inicializa zerado
-                                    };
-
-                                    await db.collection('agendamentos').add(novoAgendamento);
+                                        metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
+                                    });
                                     
                                     functionResult = { status: "SUCESSO", valor: valorServico };
                                     fallbackMsg = `✅ Agendado! ${nomeServicoOficial} com ${barbeiroEncontrado.nome} dia ${fnArgs.data} às ${horaFinal}. Valor: R$ ${valorServico},00.`;
                                 }
-
-                            } catch (e) {
-                                console.error("[DB] Erro agendamento:", e);
-                                functionResult = { erro: "Erro ao gravar." };
-                                fallbackMsg = "Erro técnico ao agendar.";
-                            }
+                            } catch (e) { console.error(e); functionResult = { erro: "Erro ao gravar." }; fallbackMsg = "Erro ao agendar."; }
                         }
-
-                        console.log("[IA] Resultado:", functionResult);
 
                         // 3️⃣ SEGUNDA CHAMADA
                         try {
@@ -1646,8 +1636,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     contents: [
-                                        { role: "user", parts: [{ text: textoRecebido }] },
-                                        { role: "model", parts: [part1] },
+                                        ...historicoParaIA, 
+                                        { role: "model", parts: [part1] }, 
                                         {
                                             role: "function",
                                             parts: [{
@@ -1681,11 +1671,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 respostaFinal = "Erro no servidor.";
             }
 
-            // --- 4️⃣ ENVIO ---
+            // 💾 3. SALVA RESPOSTA
+            if (respostaFinal) {
+                await chatRef.add({
+                    role: 'model',
+                    parts: [{ text: respostaFinal }],
+                    ts: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            // --- ENVIO ---
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
-
-            if (!respostaFinal || respostaFinal === "undefined") respostaFinal = "Erro processando resposta.";
 
             const enviarMensagem = async (destino) => {
                 const body = {
