@@ -1408,7 +1408,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             // --- 🚨 FIX MIKAELA (Troca ID do PC pelo Celular) ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 console.log(`[FIX] Detectado ID de PC da Mikaela. Trocando para celular real...`);
-                numeroRemetente = "5527996072318@s.whatsapp.net";
+                numeroRemetente = "552796072318@s.whatsapp.net";
             }
             // ----------------------------------------------------
 
