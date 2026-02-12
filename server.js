@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (KING AGENDA: CRIAR, ATUALIZAR, CANCELAR) ---
+// --- WEBHOOK FINAL (KING AGENDA + FIX ÍNDICE FIREBASE + ATUALIZAÇÃO INTELIGENTE) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1444,7 +1444,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             // ============================================================
             
-            // --- 🛠️ FERRAMENTAS COMPLETAS ---
+            // --- FERRAMENTAS ---
             const tools = [{
                 "function_declarations": [
                     {
@@ -1461,7 +1461,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     },
                     {
                         "name": "criar_agendamento",
-                        "description": "CRIA um NOVO agendamento. Use apenas se não existir um anterior para modificar.",
+                        "description": "CRIA um NOVO agendamento.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
@@ -1469,30 +1469,32 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
                                 "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
                                 "horario": { "type": "STRING", "description": "Horário HH:MM" },
-                                "servico": { "type": "STRING", "description": "Nome do serviço corrigido (ex: Corte)" }
+                                "servico": { "type": "STRING", "description": "Nome do serviço" }
                             },
                             "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
                         }
                     },
                     {
                         "name": "atualizar_agendamento",
-                        "description": "ALTERA um agendamento existente (mudar hora, dia ou serviço).",
+                        "description": "ALTERA um agendamento existente.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
-                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD (opcional)" },
-                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM (opcional)" },
-                                "novoServico": { "type": "STRING", "description": "Novo Serviço (opcional)" }
-                            }
+                                "horarioAntigo": { "type": "STRING", "description": "O horário ATUAL do agendamento que será mudado (para identificar qual alterar)" },
+                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
+                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
+                                "novoServico": { "type": "STRING", "description": "Novo Serviço" }
+                            },
+                            "required": ["horarioAntigo"] 
                         }
                     },
                     {
                         "name": "cancelar_agendamento",
-                        "description": "CANCELA ou EXCLUI um agendamento existente.",
+                        "description": "CANCELA um agendamento.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
-                                "motivo": { "type": "STRING", "description": "Motivo do cancelamento (opcional)" }
+                                "horariocancelar": { "type": "STRING", "description": "Horário do agendamento a cancelar" }
                             }
                         }
                     }
@@ -1502,13 +1504,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y";
             const MODEL_NAME = "gemini-3-flash-preview";
 
-            // --- 👑 PROMPT KING AGENDA ---
             const systemInstruction = {
                 parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
                 1. O nome do app é King Agenda.
-                2. Se o cliente quiser MUDAR, TROCAR ou REAGENDAR, use a ferramenta 'atualizar_agendamento'. JAMAIS crie um novo.
-                3. Se o cliente quiser CANCELAR, use 'cancelar_agendamento'.
-                4. Corrija erros de digitação nos serviços (ex: 'cotre' -> 'Corte') antes de enviar para a ferramenta.` }]
+                2. Para ATUALIZAR ou CANCELAR, identifique qual agendamento o usuário quer mudar (pelo horário antigo) e preencha o campo 'horarioAntigo' na função.` }]
             };
 
             let respostaFinal = "";
@@ -1553,11 +1552,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (horarioBusca.startsWith("0") && horarioBusca.length === 5) horarioBusca = horarioBusca.substring(1);
                                     
                                     const usuariosSnap = await db.collection('usuarios').get();
-                                    let barbeirosAtendem = [];
+                                    
+                                    let profissionaisPorTipo = {};
+
                                     usuariosSnap.forEach(doc => {
                                         const d = doc.data();
-                                        if (d.agenda && d.agenda[horarioBusca] === true && d.tipo !== 'admin') {
-                                            barbeirosAtendem.push({ uid: doc.id, nome: d.nome });
+                                        const ehValido = d.agenda && (d.tipo !== 'admin' || d.isProprietario === true);
+
+                                        if (ehValido && d.agenda[horarioBusca] === true) {
+                                            let tipo = d.tipo || "Profissional";
+                                            tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+                                            if (!profissionaisPorTipo[tipo]) profissionaisPorTipo[tipo] = [];
+                                            profissionaisPorTipo[tipo].push({ uid: doc.id, nome: d.nome });
                                         }
                                     });
 
@@ -1577,29 +1583,42 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         }
                                     });
 
-                                    const livres = barbeirosAtendem.filter(b => !ocupados.includes(b.uid));
+                                    let textoResposta = [];
+                                    let totalLivres = 0;
+                                    for (const [categoria, lista] of Object.entries(profissionaisPorTipo)) {
+                                        const livres = lista.filter(p => !ocupados.includes(p.uid));
+                                        if (livres.length > 0) {
+                                            const nomes = livres.map(p => p.nome).join(", ");
+                                            textoResposta.push(`*${categoria}s:* ${nomes}`);
+                                            totalLivres += livres.length;
+                                        }
+                                    }
 
-                                    if (livres.length > 0) {
-                                        functionResult = { status: "LIVRE", profissionais: livres.map(b => b.nome).join(", ") };
-                                        fallbackMsg = `Tenho estes profissionais livres às ${fnArgs.horario}: ${functionResult.profissionais}.`;
+                                    if (totalLivres > 0) {
+                                        const listaFinal = textoResposta.join("\n");
+                                        functionResult = { status: "LIVRE", detalhe: listaFinal };
+                                        fallbackMsg = `Tenho estes profissionais livres às ${fnArgs.horario}:\n${listaFinal}\n\nPosso agendar?`;
                                     } else {
                                         functionResult = { status: "OCUPADO" };
-                                        fallbackMsg = `Todos ocupados às ${fnArgs.horario}.`;
+                                        fallbackMsg = `Todos os profissionais estão ocupados às ${fnArgs.horario}.`;
                                     }
                                 } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
                             }
                         }
 
-                        // === CRIAR (NOVO) ===
+                        // === CRIAR ===
                         else if (fnName === "criar_agendamento") {
                             try {
+                                console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
+                                
                                 const allUsers = await db.collection('usuarios').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
                                 allUsers.forEach(doc => {
                                     const d = doc.data();
-                                    if (d.tipo !== 'admin') { 
+                                    const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
+                                    if (ehValido) { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
                                             barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50 };
@@ -1608,7 +1627,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 });
 
                                 if (!barbeiroEncontrado) {
-                                    functionResult = { erro: "Barbeiro não encontrado." };
+                                    functionResult = { erro: "Profissional não encontrado." };
                                     fallbackMsg = `Não achei o profissional "${fnArgs.barbeiroNome}".`;
                                 } else {
                                     const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
@@ -1618,13 +1637,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (!ownerSnap.empty) {
                                         const ownerData = ownerSnap.docs[0].data();
                                         const lista = ownerData.listaServicos || [];
-                                        // Busca flexível e inteligente para o serviço
                                         const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         const achado = lista.find(s => {
                                             const nomeS = s.nome || s;
                                             return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
                                         });
-
                                         if (achado) {
                                             if (achado.valor) valorServico = Number(achado.valor);
                                             nomeServicoOficial = achado.nome || achado;
@@ -1662,74 +1679,93 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             } catch (e) { console.error(e); functionResult = { erro: "Erro ao gravar." }; fallbackMsg = "Erro ao agendar."; }
                         }
 
-                        // === ATUALIZAR (MUDAR HORÁRIO/DATA) ===
+                        // === ATUALIZAR (FIX NO ÍNDICE) ===
                         else if (fnName === "atualizar_agendamento") {
                             try {
-                                console.log("[DB] Buscando agendamento para atualizar...");
-                                // 1. Busca o agendamento ATIVO deste cliente (confirmado ou pendente)
+                                console.log("[DB] Atualizando: Buscando por Telefone apenas...");
+                                // 🚨 FIX: Removemos o .orderBy() e .where('status') para evitar erro de índice
                                 const agSnap = await db.collection('agendamentos')
                                     .where('clienteTelefone', '==', remoteJidLimpo)
-                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                    .orderBy('data', 'asc') // Pega o mais próximo
                                     .get();
 
                                 if (agSnap.empty) {
-                                    functionResult = { erro: "Nenhum agendamento encontrado." };
-                                    fallbackMsg = "Não encontrei nenhum agendamento seu para alterar.";
+                                    functionResult = { erro: "Nenhum agendamento." };
+                                    fallbackMsg = "Não achei agendamentos seus.";
                                 } else {
-                                    // Pega o primeiro agendamento futuro
-                                    const docAgendamento = agSnap.docs[0];
-                                    const dadosAtuais = docAgendamento.data();
-                                    const idDoc = docAgendamento.id;
+                                    // Filtra e Ordena EM MEMÓRIA (Javascript)
+                                    let validos = [];
+                                    agSnap.forEach(doc => {
+                                        const d = doc.data();
+                                        if (d.status === 'confirmado' || d.status === 'conclusão pendente') {
+                                            validos.push({ id: doc.id, ...d });
+                                        }
+                                    });
 
-                                    let novosDados = {};
-                                    let msgMudanca = "";
-
-                                    // Prepara atualização
-                                    if (fnArgs.novaData) {
-                                        novosDados.data = fnArgs.novaData;
-                                        msgMudanca += `Data alterada para ${fnArgs.novaData}. `;
-                                    }
-                                    if (fnArgs.novoHorario) {
-                                        let h = fnArgs.novoHorario;
-                                        if (!h.startsWith("0") && h.length === 4) h = "0" + h;
-                                        novosDados.horario = h;
-                                        msgMudanca += `Horário alterado para ${h}. `;
-                                    }
-                                    if (fnArgs.novoServico) {
-                                        // Aqui poderia buscar o preço novo no dono de novo, mas vamos simplificar
-                                        novosDados.servico = fnArgs.novoServico;
-                                        msgMudanca += `Serviço alterado para ${fnArgs.novoServico}. `;
+                                    // Se a IA mandou o horário antigo, usamos para achar o certo
+                                    let targetDoc = null;
+                                    if (fnArgs.horarioAntigo) {
+                                        let hAntigo = fnArgs.horarioAntigo;
+                                        if (!hAntigo.startsWith("0") && hAntigo.length === 4) hAntigo = "0" + hAntigo;
+                                        targetDoc = validos.find(ag => ag.horario === hAntigo);
                                     }
 
-                                    // Executa Update
-                                    await db.collection('agendamentos').doc(idDoc).update(novosDados);
+                                    // Se não achou pelo horário (ou não mandou), pega o último criado (lógica simples)
+                                    if (!targetDoc && validos.length > 0) {
+                                         targetDoc = validos[validos.length - 1]; 
+                                    }
 
-                                    functionResult = { status: "ATUALIZADO", id: idDoc };
-                                    fallbackMsg = `✅ Agendamento atualizado! ${msgMudanca}`;
+                                    if (!targetDoc) {
+                                        functionResult = { erro: "Agendamento não encontrado." };
+                                        fallbackMsg = "Não achei o agendamento específico para alterar.";
+                                    } else {
+                                        let novosDados = {};
+                                        if (fnArgs.novaData) novosDados.data = fnArgs.novaData;
+                                        if (fnArgs.novoHorario) {
+                                            let h = fnArgs.novoHorario;
+                                            if (!h.startsWith("0") && h.length === 4) h = "0" + h;
+                                            novosDados.horario = h;
+                                        }
+                                        if (fnArgs.novoServico) novosDados.servico = fnArgs.novoServico;
+
+                                        await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
+                                        functionResult = { status: "ATUALIZADO" };
+                                        fallbackMsg = `✅ Agendamento das ${targetDoc.horario} atualizado com sucesso!`;
+                                    }
                                 }
                             } catch (e) { console.error(e); functionResult = { erro: e.message }; fallbackMsg = "Erro ao atualizar."; }
                         }
 
-                        // === CANCELAR ===
+                        // === CANCELAR (FIX NO ÍNDICE) ===
                         else if (fnName === "cancelar_agendamento") {
                             try {
-                                console.log("[DB] Buscando agendamento para cancelar...");
+                                console.log("[DB] Cancelando: Buscando por Telefone apenas...");
                                 const agSnap = await db.collection('agendamentos')
                                     .where('clienteTelefone', '==', remoteJidLimpo)
-                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                    .orderBy('data', 'asc')
                                     .get();
 
-                                if (agSnap.empty) {
+                                let validos = [];
+                                agSnap.forEach(doc => {
+                                    const d = doc.data();
+                                    if (d.status === 'confirmado' || d.status === 'conclusão pendente') {
+                                        validos.push({ id: doc.id, ...d });
+                                    }
+                                });
+
+                                let targetDoc = null;
+                                if (fnArgs.horariocancelar) {
+                                    let hCanc = fnArgs.horariocancelar;
+                                    if (!hCanc.startsWith("0") && hCanc.length === 4) hCanc = "0" + hCanc;
+                                    targetDoc = validos.find(ag => ag.horario === hCanc);
+                                }
+                                if (!targetDoc && validos.length > 0) targetDoc = validos[0];
+
+                                if (!targetDoc) {
                                     functionResult = { erro: "Nada para cancelar." };
-                                    fallbackMsg = "Você não tem agendamentos ativos para cancelar.";
+                                    fallbackMsg = "Não achei agendamento para cancelar.";
                                 } else {
-                                    const idDoc = agSnap.docs[0].id;
-                                    await db.collection('agendamentos').doc(idDoc).update({ status: 'cancelado' });
-                                    
+                                    await db.collection('agendamentos').doc(targetDoc.id).update({ status: 'cancelado' });
                                     functionResult = { status: "CANCELADO" };
-                                    fallbackMsg = "✅ Agendamento cancelado com sucesso.";
+                                    fallbackMsg = `✅ Agendamento das ${targetDoc.horario} cancelado.`;
                                 }
                             } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao cancelar."; }
                         }
@@ -1802,14 +1838,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     number: destino,
                     textMessage: { text: respostaFinal }
                 };
+                
                 console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
 
                 try {
-                    await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                         body: JSON.stringify(body)
                     });
+                    console.log(`[ZAP] Status envio: ${r.status}`);
                 } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
             };
 
