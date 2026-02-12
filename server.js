@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (GEMINI 3 + ENVIO SEM VALIDAÇÃO) ---
+// --- WEBHOOK FINAL (GEMINI 3 + CORREÇÃO MIKAELA) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!"); 
@@ -1402,8 +1402,15 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
             const key = data.data.key || {};
-            const numeroRemetente = key.remoteJid; 
+            let numeroRemetente = key.remoteJid; 
             const fromMe = key.fromMe;
+
+            // --- 🚨 FIX MIKAELA (Troca ID do PC pelo Celular) ---
+            if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
+                console.log(`[FIX] Detectado ID de PC da Mikaela. Trocando para celular real...`);
+                numeroRemetente = "5527996072318@s.whatsapp.net";
+            }
+            // ----------------------------------------------------
 
             // Extração do texto
             const textoRecebido = 
@@ -1415,9 +1422,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- IA GEMINI (FUNCIONANDO!) ---
+            // --- IA GEMINI (GEMINI 3 NA V1BETA) ---
             let respostaIA = "";
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y"; 
+            
+            // Modelo Gemini 3 (Requer v1beta)
             const MODEL_NAME = "gemini-3-flash-preview"; 
             
             const prompt = `Você é o assistente virtual da Barbearia Navalha de Ouro. Seja amigável e direto. Responda: ${textoRecebido}`;
@@ -1425,6 +1434,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             try {
                 console.log(`[IA] Solicitando ao ${MODEL_NAME} via v1beta...`);
                 
+                // USANDO A ROTA v1beta PARA ACEITAR O GEMINI 3
                 const responseIA = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1442,16 +1452,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 }
             } catch (err) { console.error("[IA] Erro de Conexão Gemini:", err.message); }
 
-            // --- ENVIO BLINDADO (SEM OPTIONS) ---
-            // COLE SEU LINK ATUAL AQUI SE MUDOU:
-            const LINK_CLOUDFLARE = "https://robertson-christmas-internet-experience.trycloudflare.com"; 
+            // --- ENVIO (LINK DO TUNEL + SEM VALIDAÇÃO) ---
+            
+            // ⚠️ COLE SEU LINK NOVO AQUI EMBAIXO 👇
+            const LINK_CLOUDFLARE = "https://SEU-LINK-NOVO-AQUI.trycloudflare.com"; 
+            
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    // REMOVEMOS O 'options' COM DELAY E PRESENCE
-                    // Isso impede que o robô tente validar o número antes de enviar.
+                    // SEM 'options' (delay/presence) PARA EVITAR ERRO DE VALIDAÇÃO
                     textMessage: { text: respostaIA || "Olá! Como posso ajudar? 💈" }
                 };
 
@@ -1462,20 +1473,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 });
             };
 
-            // TENTATIVA 1: ID Original (Sem verificar se existe)
-            console.log(`[IA] Tentativa 1: Enviando para ${numeroRemetente}...`);
+            // TENTATIVA ÚNICA (JÁ CORRIGIDA NO INÍCIO)
+            console.log(`[IA] Enviando para ${numeroRemetente}...`);
             let respZap = await enviarMensagem(numeroRemetente);
 
-            // TENTATIVA 2: Se falhar, tenta o número limpo (só números)
-            // Se o ID for de computador (126...), a tentativa 2 vai falhar também, e ISSO É NORMAL.
-            // O importante é testar com um celular real depois.
-            if (respZap.status !== 201) {
-                const numeroLimpo = numeroRemetente.split('@')[0];
-                console.log(`[IA] Erro (${respZap.status}). Tentativa 2 para número limpo: ${numeroLimpo}`);
-                respZap = await enviarMensagem(numeroLimpo);
-            }
-
             console.log(`[IA] Status final do envio: ${respZap.status}`);
+            
+            if (respZap.status !== 201) {
+                const erroMsg = await respZap.text();
+                console.error(`[IA] Motivo do erro: ${erroMsg}`);
+            }
         }
         res.status(200).send('EVENT_RECEIVED');
     } catch (error) {
