@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (MEMÓRIA SEGURA 15 MSG + KING AGENDA) ---
+// --- WEBHOOK FINAL (CORREÇÃO DE TRAVAMENTO + FILTRO EM MEMÓRIA) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1421,22 +1421,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const remoteJidLimpo = numeroRemetente.split('@')[0];
 
             // ============================================================
-            // 🧠 GESTÃO DE MEMÓRIA SEGURA (15 MENSAGENS)
+            // 🧠 MEMÓRIA (15 MSG)
             // ============================================================
-            
-            // 👇 AQUI ESTÁ A SEGURANÇA: APENAS 15 MENSAGENS
             const limitHistorico = 15; 
-            
             const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
 
-            // 1. Salva a mensagem atual
             await chatRef.add({
                 role: 'user',
                 parts: [{ text: textoRecebido }],
                 ts: admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // 2. Busca o histórico (Consome apenas 15 leituras)
             const historySnap = await chatRef.orderBy('ts', 'desc').limit(limitHistorico).get();
             let historicoParaIA = [];
             
@@ -1487,15 +1482,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             const systemInstruction = {
                 parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                1. Use a memória da conversa para não perguntar coisas repetidas.
-                2. Consulte disponibilidade antes de agendar.
-                3. Para agendar, obtenha: Barbeiro, Cliente, Data, Hora e Serviço.` }]
+                1. Consulte disponibilidade antes de agendar.
+                2. Para agendar, obtenha: Barbeiro, Cliente, Data, Hora e Serviço.` }]
             };
 
             let respostaFinal = "";
 
             try {
-                // 1️⃣ PRIMEIRA CHAMADA (COM HISTÓRICO)
+                // 1️⃣ PRIMEIRA CHAMADA
                 console.log(`[IA] Pensando com contexto de ${historicoParaIA.length} mensagens...`);
                 
                 const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
@@ -1523,34 +1517,53 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let functionResult = {};
                         let fallbackMsg = "";
 
-                        // === CONSULTAR ===
+                        // === CONSULTAR (CORRIGIDO PARA NÃO TRAVAR) ===
                         if (fnName === "consultar_disponibilidade") {
                              if (!fnArgs.horario || fnArgs.horario === "undefined") {
                                 functionResult = { erro: "Horário ausente." };
                                 fallbackMsg = "Qual horário você quer verificar?";
                             } else {
                                 try {
+                                    console.log("[DB] Iniciando consulta..."); // Checkpoint 1
+
+                                    // 1. Normaliza Horário da Agenda (sem zero)
                                     let horarioBusca = fnArgs.horario;
                                     if (horarioBusca.startsWith("0") && horarioBusca.length === 5) horarioBusca = horarioBusca.substring(1);
 
+                                    // 2. Busca Barbeiros
                                     const usuariosSnap = await db.collection('usuarios').where('tipo', '==', 'barbeiro').get();
                                     let barbeirosAtendem = [];
                                     usuariosSnap.forEach(doc => {
                                         const d = doc.data();
                                         if (d.agenda && d.agenda[horarioBusca] === true) barbeirosAtendem.push({ uid: doc.id, nome: d.nome });
                                     });
+                                    console.log(`[DB] ${barbeirosAtendem.length} barbeiros atendem às ${horarioBusca}.`); // Checkpoint 2
 
+                                    // 3. Normaliza Horário do Agendamento (com zero)
                                     let horarioAg = fnArgs.horario;
                                     if (!horarioAg.startsWith("0") && horarioAg.length === 4) horarioAg = "0" + horarioAg;
 
+                                    // 4. Busca Agendamentos (SEM 'IN' PARA NÃO TRAVAR)
+                                    // Buscamos apenas por Data e Horário. O filtro de status fazemos via código.
                                     const agSnap = await db.collection('agendamentos')
                                         .where('data', '==', fnArgs.data)
                                         .where('horario', '==', horarioAg)
-                                        .where('status', 'in', ['confirmado', 'conclusão pendente'])
                                         .get();
                                     
-                                    const ocupados = agSnap.docs.map(d => d.data().barbeiroUid);
+                                    console.log(`[DB] Encontrados ${agSnap.size} agendamentos totais neste horário.`); // Checkpoint 3
+
+                                    // 5. Filtro Manual (Javascript) - Mais seguro
+                                    const ocupados = [];
+                                    agSnap.forEach(doc => {
+                                        const ag = doc.data();
+                                        // Só conta como ocupado se estiver confirmado ou pendente
+                                        if (ag.status === 'confirmado' || ag.status === 'conclusão pendente') {
+                                            ocupados.push(ag.barbeiroUid);
+                                        }
+                                    });
+
                                     const livres = barbeirosAtendem.filter(b => !ocupados.includes(b.uid));
+                                    console.log(`[DB] Livres: ${livres.length}`); // Checkpoint 4
 
                                     if (livres.length > 0) {
                                         functionResult = { status: "LIVRE", profissionais: livres.map(b => b.nome).join(", ") };
@@ -1559,11 +1572,15 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         functionResult = { status: "OCUPADO" };
                                         fallbackMsg = `Lotado às ${fnArgs.horario}.`;
                                     }
-                                } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
+                                } catch (e) { 
+                                    console.error("[DB] ERRO CRÍTICO NA CONSULTA:", e); 
+                                    functionResult = { erro: e.message }; 
+                                    fallbackMsg = "Erro na consulta."; 
+                                }
                             }
                         }
 
-                        // === AGENDAR ===
+                        // === AGENDAR (MANTIDO) ===
                         else if (fnName === "criar_agendamento") {
                             try {
                                 console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
@@ -1629,6 +1646,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             } catch (e) { console.error(e); functionResult = { erro: "Erro ao gravar." }; fallbackMsg = "Erro ao agendar."; }
                         }
 
+                        console.log("[IA] Resultado Real:", functionResult); // TEM QUE APARECER ISSO AGORA!
+
                         // 3️⃣ SEGUNDA CHAMADA
                         try {
                             const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
@@ -1690,11 +1709,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     textMessage: { text: respostaFinal }
                 };
                 try {
-                    await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                         body: JSON.stringify(body)
                     });
+                    console.log(`[ZAP] Status envio: ${r.status}`);
                 } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
             };
 
