@@ -1407,7 +1407,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             // --- 🚨 FIX MIKAELA ---
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-                numeroRemetente = "552796072318@s.whatsapp.net"; 
+                numeroRemetente = "5527996598623@s.whatsapp.net"; 
             }
 
             const textoRecebido =
