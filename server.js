@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK CORRIGIDO (GEMINI 3 + THOUGHT SIGNATURE FIX) ---
+// --- WEBHOOK BLINDADO (GEMINI 3 + RESPOSTA GARANTIDA) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1419,7 +1419,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
 
-            // --- DEFINIÇÃO DAS FERRAMENTAS ---
+            // --- FERRAMENTAS ---
             const tools = [{
                 "function_declarations": [{
                     "name": "consultar_disponibilidade",
@@ -1439,14 +1439,15 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const MODEL_NAME = "gemini-3-flash-preview";
 
             const systemInstruction = {
-                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Se o cliente perguntar se tem horário, use a ferramenta 'consultar_disponibilidade'. Seja breve." }]
+                parts: [{ text: "Você é o recepcionista da Barbearia Navalha de Ouro. Hoje é " + new Date().toLocaleDateString('pt-BR') + ". Use a ferramenta 'consultar_disponibilidade' para ver se tem horário. Seja breve." }]
             };
 
+            // Variável que vai guardar a resposta final
             let respostaFinal = "";
 
             try {
-                // PRIMEIRA CHAMADA
-                console.log(`[IA] Pensando...`);
+                // 1️⃣ PRIMEIRA CHAMADA
+                console.log(`[IA] Pensando (Passo 1)...`);
                 const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1460,21 +1461,20 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 const data1 = await response1.json();
                 
                 if (!data1.candidates || !data1.candidates[0]) {
-                    console.error("[IA] Erro na primeira resposta:", JSON.stringify(data1));
-                    respostaFinal = "Erro técnico na IA.";
+                    respostaFinal = "Desculpe, estou meio confuso. Pode repetir?";
                 } else {
-                    // PEGAMOS O OBJETO COMPLETO AQUI (COM A ASSINATURA)
-                    const part1 = data1.candidates[0].content.parts[0]; 
+                    const part1 = data1.candidates[0].content.parts[0];
 
-                    // --- VERIFICA SE A IA CHAMOU FUNÇÃO ---
+                    // 2️⃣ VERIFICA SE CHAMOU FUNÇÃO
                     if (part1.functionCall) {
                         const fnName = part1.functionCall.name;
                         const fnArgs = part1.functionCall.args;
-                        console.log(`[IA] Decidiu usar a ferramenta: ${fnName}`, fnArgs);
+                        console.log(`[IA] Ferramenta acionada: ${fnName}`, fnArgs);
 
                         let functionResult = {};
+                        let fallbackMsg = ""; // Mensagem de emergência
 
-                        // CONSULTA BANCO
+                        // LÓGICA DO BANCO
                         if (fnName === "consultar_disponibilidade") {
                             try {
                                 const snapshot = await db.collection('agendamentos')
@@ -1484,75 +1484,94 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     .get();
 
                                 if (snapshot.empty) {
-                                    functionResult = { status: "LIVRE", obs: "Horário vago." };
+                                    functionResult = { status: "LIVRE", obs: "Vago." };
+                                    fallbackMsg = `Verifiquei aqui e o horário de ${fnArgs.horario} está LIVRE! ✅ Gostaria de agendar?`;
                                 } else {
-                                    functionResult = { status: "OCUPADO", obs: "Já reservado." };
+                                    functionResult = { status: "OCUPADO", obs: "Reservado." };
+                                    fallbackMsg = `Poxa, o horário de ${fnArgs.horario} já está ocupado. ❌ Que tal outro?`;
                                 }
                             } catch (dbError) {
-                                functionResult = { status: "ERRO", obs: "Falha no banco." };
+                                functionResult = { status: "ERRO", obs: "Falha BD." };
+                                fallbackMsg = "Tive um erro ao consultar a agenda.";
                             }
                         }
 
                         console.log("[IA] Resultado do Banco:", functionResult);
 
-                        // SEGUNDA CHAMADA (CORRIGIDA)
-                        // Enviamos 'part1' inteiro, sem criar um novo objeto. Isso preserva a assinatura.
-                        const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [
-                                    { role: "user", parts: [{ text: textoRecebido }] },
-                                    { role: "model", parts: [part1] }, // <--- AQUI ESTÁ A CORREÇÃO MÁGICA
-                                    {
-                                        role: "function",
-                                        parts: [{
-                                            functionResponse: {
-                                                name: fnName,
-                                                response: { name: fnName, content: functionResult }
-                                            }
-                                        }]
-                                    }
-                                ],
-                                tools: tools
-                            })
-                        });
+                        // 3️⃣ SEGUNDA CHAMADA (COM PROTEÇÃO TOTAL)
+                        try {
+                            console.log("[IA] Gerando resposta final (Passo 2)...");
+                            
+                            const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    contents: [
+                                        { role: "user", parts: [{ text: textoRecebido }] },
+                                        { role: "model", parts: [part1] }, // Mantém assinatura
+                                        {
+                                            role: "function",
+                                            parts: [{
+                                                functionResponse: {
+                                                    name: fnName,
+                                                    response: { name: fnName, content: functionResult }
+                                                }
+                                            }]
+                                        }
+                                    ],
+                                    tools: tools
+                                })
+                            });
 
-                        const data2 = await response2.json();
+                            const data2 = await response2.json();
 
-                        if (data2.candidates && data2.candidates.length > 0) {
-                            respostaFinal = data2.candidates[0].content.parts[0].text;
-                        } else {
-                            console.error("[IA] Erro JSON Final:", JSON.stringify(data2, null, 2));
-                            // Fallback manual se a IA falhar de novo
-                            if(functionResult.status === "LIVRE") respostaFinal = "Verifiquei aqui e está livre! ✅";
-                            else respostaFinal = "Poxa, esse horário já está ocupado. ❌";
+                            if (data2.candidates && data2.candidates[0]) {
+                                respostaFinal = data2.candidates[0].content.parts[0].text;
+                                console.log("[IA] Resposta gerada com sucesso!");
+                            } else {
+                                throw new Error("IA não retornou texto na segunda volta.");
+                            }
+
+                        } catch (err2) {
+                            console.error("[IA] Falha na segunda chamada. Usando Fallback.", err2.message);
+                            // AQUI É O PULO DO GATO: Se a IA falhar, usamos a mensagem manual
+                            respostaFinal = fallbackMsg; 
                         }
+
                     } else {
-                        respostaFinal = part1.text || "Desculpe, não entendi.";
+                        respostaFinal = part1.text || "Não entendi.";
                     }
                 }
 
             } catch (err) {
                 console.error("[IA] Erro Geral:", err);
-                respostaFinal = "Falha técnica.";
+                respostaFinal = "Estou enfrentando problemas técnicos momentâneos.";
             }
 
-            // --- ENVIO ---
-            // LINK CLOUDFLARE (SEU LINK ATUAL)
+            // --- 4️⃣ ENVIO FINAL (O QUE ESTAVA FALTANDO) ---
+            
+            // VERIFIQUE SE O LINK DO TUNEL AINDA É ESSE:
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
+
+            console.log(`[ZAP] Enviando resposta final: "${respostaFinal}"`);
 
             const enviarMensagem = async (destino) => {
                 const body = {
                     number: destino,
-                    textMessage: { text: respostaFinal }
+                    textMessage: { text: respostaFinal || "Erro ao gerar resposta." }
                 };
-                return await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
-                    body: JSON.stringify(body)
-                });
+                // Adicionei um try/catch aqui também para garantir o log
+                try {
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                        body: JSON.stringify(body)
+                    });
+                    console.log(`[ZAP] Status envio: ${r.status}`);
+                } catch (e) {
+                    console.error("[ZAP] Erro ao enviar fetch:", e.message);
+                }
             };
 
             await enviarMensagem(numeroRemetente);
