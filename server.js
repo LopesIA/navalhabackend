@@ -1392,7 +1392,7 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
-// --- WEBHOOK FINAL (KING AGENDA + BLOQUEIO DE ADMINS) ---
+// --- WEBHOOK FINAL (KING AGENDA + FIX ERRO INTERNO + SEM ADMINS) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
@@ -1480,10 +1480,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y";
             const MODEL_NAME = "gemini-3-flash-preview";
 
+            // --- 👑 PROMPT KING AGENDA (AJUSTADO PARA EVITAR TRAVAMENTO) ---
             const systemInstruction = {
                 parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                1. O nome do app é King Agenda.
-                2. Consulte disponibilidade. Se estiver livre e o usuário já deu todos os dados, chame 'criar_agendamento'.` }]
+                1. Consulte a disponibilidade.
+                2. Após consultar, SE ESTIVER LIVRE, diga ao cliente que está livre e PERGUNTE se pode confirmar o agendamento.
+                3. NÃO chame 'criar_agendamento' imediatamente após consultar. Espere o 'Sim' do usuário.` }]
             };
 
             let respostaFinal = "";
@@ -1517,7 +1519,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let functionResult = {};
                         let fallbackMsg = "";
 
-                        // === CONSULTAR (COM BLOQUEIO DE ADMIN) ===
+                        // === CONSULTAR ===
                         if (fnName === "consultar_disponibilidade") {
                              if (!fnArgs.horario || fnArgs.horario === "undefined") {
                                 functionResult = { erro: "Horário ausente." };
@@ -1527,18 +1529,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     let horarioBusca = fnArgs.horario;
                                     if (horarioBusca.startsWith("0") && horarioBusca.length === 5) horarioBusca = horarioBusca.substring(1);
                                     
-                                    // Pega TODOS
                                     const usuariosSnap = await db.collection('usuarios').get();
                                     
                                     let barbeirosAtendem = [];
                                     usuariosSnap.forEach(doc => {
                                         const d = doc.data();
-                                        
-                                        // 🚨 FILTRO DE SEGURANÇA:
-                                        // 1. Tem que ter agenda no horário
-                                        // 2. O tipo NÃO pode ser 'admin' (a menos que seja proprietário cortando cabelo, mas admin puro sai fora)
-                                        // Se você usa o admin para cortar cabelo, mude o tipo dele para 'barbeiro' ou 'dono'.
-                                        
+                                        // Filtra ADMIN puro, mas deixa DONO ou BARBEIRO
                                         if (d.agenda && d.agenda[horarioBusca] === true && d.tipo !== 'admin') {
                                             barbeirosAtendem.push({ uid: doc.id, nome: d.nome });
                                         }
@@ -1565,7 +1561,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                     if (livres.length > 0) {
                                         functionResult = { status: "LIVRE", profissionais: livres.map(b => b.nome).join(", ") };
-                                        fallbackMsg = `Tenho estes profissionais livres às ${fnArgs.horario}: ${functionResult.profissionais}.`;
+                                        fallbackMsg = `Tenho estes profissionais livres às ${fnArgs.horario}: ${functionResult.profissionais}. Posso agendar?`;
                                     } else {
                                         functionResult = { status: "OCUPADO" };
                                         fallbackMsg = `Todos os profissionais estão ocupados às ${fnArgs.horario}.`;
@@ -1574,7 +1570,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             }
                         }
 
-                        // === AGENDAR (COM BLOQUEIO DE ADMIN) ===
+                        // === AGENDAR ===
                         else if (fnName === "criar_agendamento") {
                             try {
                                 console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
@@ -1585,7 +1581,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 allUsers.forEach(doc => {
                                     const d = doc.data();
-                                    // 🚨 FILTRO: Ignora ADMIN na busca de nome também
                                     if (d.tipo !== 'admin') { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
@@ -1675,11 +1670,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             });
 
                             const data2 = await response2.json();
-                            if (data2.candidates && data2.candidates[0]) {
+                            
+                            // 🚨 CORREÇÃO PARA "ERRO INTERNO"
+                            // Se a IA devolver texto, ótimo. Se devolver vazio (tentou chamar função dupla), usamos o fallback.
+                            if (data2.candidates && data2.candidates[0] && data2.candidates[0].content && data2.candidates[0].content.parts && data2.candidates[0].content.parts[0].text) {
                                 respostaFinal = data2.candidates[0].content.parts[0].text;
                             } else {
-                                throw new Error("JSON IA vazio.");
+                                console.log("[IA] Texto vazio na volta (Provável encadeamento). Usando Fallback.");
+                                respostaFinal = fallbackMsg;
                             }
+
                         } catch (err2) {
                             console.error("[IA] Fallback:", err2.message);
                             respostaFinal = fallbackMsg; 
@@ -1706,7 +1706,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
             const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
 
-            if (!respostaFinal) respostaFinal = "Erro interno.";
+            if (!respostaFinal) respostaFinal = "Erro interno (Resposta vazia).";
             respostaFinal = respostaFinal.replace(/undefined/g, "");
 
             const enviarMensagem = async (destino) => {
@@ -1724,10 +1724,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         body: JSON.stringify(body)
                     });
                     console.log(`[ZAP] Status envio: ${r.status}`);
-                    if(r.status === 400) {
-                         const errText = await r.text();
-                         console.error("[ZAP] Retorno 400 Detalhado:", errText);
-                    }
                 } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
             };
 
