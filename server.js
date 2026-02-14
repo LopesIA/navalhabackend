@@ -1860,6 +1860,83 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     }
 });
 
+// --- ROTA DE CORREÇÃO DE DATAS (RODAR UMA VEZ E APAGAR) ---
+app.get('/admin/corrigir-datas-extrato', async (req, res) => {
+    try {
+        console.log("🔄 Iniciando correção massiva de datas...");
+        
+        // 1. Pega todos os extratos
+        const extratosSnapshot = await db.collection('extrato_financeiro').get();
+        
+        if (extratosSnapshot.empty) return res.send("Nenhum extrato encontrado.");
+
+        let atualizados = 0;
+        let erros = 0;
+        let ignorados = 0;
+
+        // O Firestore só aceita 500 operações por lote (batch). Vamos fazer de 1 em 1 para garantir.
+        // Se tiver muitos dados (>2000), pode demorar uns segundos.
+
+        for (const docExtrato of extratosSnapshot.docs) {
+            const dadosExtrato = docExtrato.data();
+            const agendamentoId = dadosExtrato.agendamentoId;
+
+            if (!agendamentoId) {
+                ignorados++;
+                continue;
+            }
+
+            try {
+                // 2. Busca o Agendamento Original
+                const docAgendamento = await db.collection('agendamentos').doc(agendamentoId).get();
+
+                if (!docAgendamento.exists) {
+                    console.log(`⚠️ Agendamento ${agendamentoId} não existe mais. Pulando.`);
+                    ignorados++;
+                    continue;
+                }
+
+                const dadosAgendamento = docAgendamento.data();
+
+                // 3. Define a Data Correta
+                // A prioridade é: dataConclusao > ts (timestamp) > data original
+                let novaDataEvento = null;
+
+                if (dadosAgendamento.dataConclusao) {
+                    novaDataEvento = dadosAgendamento.dataConclusao;
+                } else if (dadosAgendamento.ts) {
+                    // Se não tiver dataConclusao, usamos o TS de quando foi modificado pela ultima vez
+                    novaDataEvento = dadosAgendamento.ts;
+                }
+
+                // Só atualiza se achou uma data válida e se for diferente da atual (pra economizar escrita)
+                if (novaDataEvento) {
+                    // Atualiza o extrato
+                    await db.collection('extrato_financeiro').doc(docExtrato.id).update({
+                        dataEvento: novaDataEvento,
+                        dataCorrecao: admin.firestore.FieldValue.serverTimestamp() // Marca que mexemos aqui
+                    });
+                    atualizados++;
+                    console.log(`✅ Extrato ${docExtrato.id} corrigido para: ${novaDataEvento.toDate ? novaDataEvento.toDate() : novaDataEvento}`);
+                } else {
+                    ignorados++;
+                }
+
+            } catch (errLoop) {
+                console.error(`Erro no extrato ${docExtrato.id}:`, errLoop);
+                erros++;
+            }
+        }
+
+        console.log(`🏁 FIM. Atualizados: ${atualizados} | Ignorados: ${ignorados} | Erros: ${erros}`);
+        res.send(`<h2>Correção Finalizada!</h2><p>✅ Atualizados: ${atualizados}</p><p>⏭️ Ignorados: ${ignorados}</p><p>❌ Erros: ${erros}</p>`);
+
+    } catch (error) {
+        console.error("Erro Geral:", error);
+        res.status(500).send("Erro fatal no script: " + error.message);
+    }
+});
+
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
