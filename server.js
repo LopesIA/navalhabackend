@@ -1501,8 +1501,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 ]
             }];
 
-            const API_KEY = "AIzaSyBgFR2PE5JbCn0jO26jpuZtXYo7F1c4I0Y";
-            const MODEL_NAME = "gemini-3-flash-preview";
+const API_KEY = process.env.GEMINI_API_KEY;
+const MODEL_NAME = "gemini-1.5-flash"; // Atualizado para um modelo válido e rápido
 
             const systemInstruction = {
                 parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
