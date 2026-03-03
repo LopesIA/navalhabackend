@@ -1937,6 +1937,97 @@ app.get('/admin/corrigir-datas-extrato', async (req, res) => {
     }
 });
 
+// ==================================================================
+// ⏰ ROTA DE CRON JOB (UPTIME ROBOT) - VERIFICAÇÃO DE INAUGURAÇÃO
+// ==================================================================
+app.get('/cron/verificar-inauguracao', async (req, res) => {
+    try {
+        // 1. SEGURANÇA: Chave simples para ninguém ficar chamando essa rota à toa
+        const chaveSeguranca = req.query.key;
+        if (chaveSeguranca !== 'CronSeguroKing2026') {
+            return res.status(401).send('Acesso não autorizado. Chave incorreta.');
+        }
+
+        console.log("⏰ [CRON] Iniciando verificação de profissionais em Inauguração...");
+
+        // 2. BUSCA: Pega todos que estão com o modo ativado
+        const snapshot = await db.collection('usuarios')
+            .where('modoInauguracao', '==', true)
+            .get();
+
+        if (snapshot.empty) {
+            console.log("✅ [CRON] Nenhum profissional em inauguração no momento.");
+            return res.status(200).send('Nenhum profissional para processar.');
+        }
+
+        let processados = 0;
+        let desativados = 0;
+        const batch = db.batch(); // Usamos batch para ser atômico e rápido
+        const agora = new Date();
+
+        snapshot.forEach(doc => {
+            processados++;
+            const dados = doc.data();
+            let deveDesativar = false;
+            let motivo = '';
+
+            // --- REGRA 1: PRAZO DE 30 DIAS ---
+            if (dados.dataInicioInauguracao) {
+                // Converte Timestamp do Firestore para Date JS
+                const dataInicio = dados.dataInicioInauguracao.toDate ? dados.dataInicioInauguracao.toDate() : new Date(dados.dataInicioInauguracao);
+                
+                // Calcula diferença em dias
+                const diferencaTempo = agora.getTime() - dataInicio.getTime();
+                const diasPassados = diferencaTempo / (1000 * 3600 * 24);
+
+                if (diasPassados >= 30) {
+                    deveDesativar = true;
+                    motivo = 'Prazo de 30 dias expirado';
+                }
+            }
+
+            // --- REGRA 2: META FINANCEIRA (R$ 100,00) ---
+            // Se não tiver o campo, assume 0
+            const saldoDescontos = dados.saldoDescontosInauguracao || 0;
+            if (saldoDescontos >= 100) {
+                deveDesativar = true;
+                motivo = `Meta de R$ 100 atingida (Atual: R$ ${saldoDescontos})`;
+            }
+
+            // --- AÇÃO ---
+            if (deveDesativar) {
+                console.log(`🚫 Desativando inauguração de ${dados.nome || doc.id} - Motivo: ${motivo}`);
+                
+                const userRef = db.collection('usuarios').doc(doc.id);
+                batch.update(userRef, {
+                    modoInauguracao: false,
+                    statusInauguracao: 'concluido',
+                    tier: 4, // Opcional: Já garante o Tier 4 se a regra for essa
+                    dataFimInauguracao: admin.firestore.FieldValue.serverTimestamp()
+                });
+                desativados++;
+            }
+        });
+
+        // Só commita se tiver algo para atualizar
+        if (desativados > 0) {
+            await batch.commit();
+        }
+
+        const msgFinal = `[CRON] Fim. Processados: ${processados} | Desativados: ${desativados}`;
+        console.log(msgFinal);
+        res.status(200).send(msgFinal);
+
+    } catch (error) {
+        console.error("❌ [CRON ERRO]", error);
+        res.status(500).send("Erro interno no Cron Job: " + error.message);
+    }
+});
+
+// ==================================================================
+// FIM DA ROTA DE CRON
+// ==================================================================
+
 // --- INICIALIZAÇÃO DO SERVIDOR ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
