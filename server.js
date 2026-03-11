@@ -1403,7 +1403,14 @@ app.post('/api/chat-visagista', async (req, res) => {
         return res.status(500).json({ sucesso: false, erro: "A chave GEMINI_API_KEY não foi encontrada no Render!" });
     }
 
-    let modelosParaTestar = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-1.0-pro"];
+    // LISTA CORRIGIDA COM OS MODELOS REAIS DA SUA NOVA CHAVE
+    let modelosParaTestar = [
+        "gemini-2.5-flash", 
+        "gemini-2.0-flash", 
+        "gemini-flash-latest", 
+        "gemini-2.5-pro"
+    ];
+    
     if (modeloAtual) {
         modelosParaTestar = modelosParaTestar.filter(m => m !== modeloAtual);
         modelosParaTestar.unshift(modeloAtual);
@@ -1555,7 +1562,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             }];
 
 const API_KEY = process.env.GEMINI_API_KEY;
-const MODEL_NAME = "gemini-1.5-flash"; // Atualizado para um modelo válido e rápido
+const MODEL_NAME = "gemini-2.5-flash"; // Atualizado para o modelo super rápido da sua chave
 
             const systemInstruction = {
                 parts: [{ text: `Você é o assistente virtual do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
