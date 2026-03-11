@@ -1392,6 +1392,82 @@ app.get('/ia/modelos', async (req, res) => {
     }
 });
 
+// =================================================================
+// 🤖 ROTA SEGURA DO CHAT VISAGISTA (GEMINI COM CONTINGÊNCIA)
+// =================================================================
+app.post('/api/chat-visagista', async (req, res) => {
+    const { conteudoHistorico, modeloAtual } = req.body;
+    
+    // Puxa a chave que você JÁ TEM configurada no ambiente (Render)
+    const API_KEY = process.env.GEMINI_API_KEY;
+
+    if (!API_KEY) {
+        return res.status(500).json({ sucesso: false, erro: "Chave da API não configurada no servidor." });
+    }
+
+    // Lista atualizada dos melhores modelos para texto (ordem de prioridade)
+    let modelosParaTestar = [
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-latest",
+        "gemini-1.5-pro",
+        "gemini-1.0-pro"
+    ];
+
+    // Se o front já descobriu qual funciona, ele vem no topo
+    if (modeloAtual) {
+        modelosParaTestar = modelosParaTestar.filter(m => m !== modeloAtual);
+        modelosParaTestar.unshift(modeloAtual);
+    }
+
+    let erroFinal = null;
+
+    for (const modelo of modelosParaTestar) {
+        try {
+            console.log(`[VISAGISTA] Testando modelo: ${modelo}...`);
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${API_KEY}`;
+            
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: conteudoHistorico,
+                    generationConfig: { 
+                        temperature: 0.7, 
+                        maxOutputTokens: 8000 
+                    }
+                })
+            });
+
+            const data = await response.json();
+
+            // Pula para o próximo modelo se der erro 404 (Não existe) ou 429 (Sem cota)
+            if (!response.ok) {
+                if ([404, 403, 429, 400].includes(response.status)) {
+                    console.warn(`[VISAGISTA] Modelo ${modelo} falhou (${response.status}). Pulando...`);
+                    continue; 
+                }
+                throw new Error(data.error?.message || "Erro na API");
+            }
+
+            console.log(`✅ [VISAGISTA] Sucesso com o modelo: ${modelo}`);
+            return res.json({ 
+                sucesso: true, 
+                texto: data.candidates[0].content.parts[0].text, 
+                modeloAceito: modelo 
+            });
+
+        } catch (erro) {
+            erroFinal = erro;
+        }
+    }
+    
+    res.status(500).json({ 
+        sucesso: false, 
+        erro: "Todos os modelos falharam. Erro interno: " + (erroFinal?.message || "Desconhecido")
+    });
+});
+// =================================================================
+
 // --- WEBHOOK FINAL (KING AGENDA + FIX ÍNDICE FIREBASE + ATUALIZAÇÃO INTELIGENTE) ---
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
