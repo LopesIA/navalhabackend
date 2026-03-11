@@ -1393,78 +1393,55 @@ app.get('/ia/modelos', async (req, res) => {
 });
 
 // =================================================================
-// 🤖 ROTA SEGURA DO CHAT VISAGISTA (GEMINI COM CONTINGÊNCIA)
+// 🤖 ROTA SEGURA DO CHAT VISAGISTA (COM CAPTURA DE ERRO EXATO)
 // =================================================================
 app.post('/api/chat-visagista', async (req, res) => {
     const { conteudoHistorico, modeloAtual } = req.body;
-    
-    // Puxa a chave que você JÁ TEM configurada no ambiente (Render)
     const API_KEY = process.env.GEMINI_API_KEY;
 
     if (!API_KEY) {
-        return res.status(500).json({ sucesso: false, erro: "Chave da API não configurada no servidor." });
+        return res.status(500).json({ sucesso: false, erro: "A chave GEMINI_API_KEY não foi encontrada no Render!" });
     }
 
-    // Lista atualizada dos melhores modelos para texto (ordem de prioridade)
-    let modelosParaTestar = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
-        "gemini-1.5-pro",
-        "gemini-1.0-pro"
-    ];
-
-    // Se o front já descobriu qual funciona, ele vem no topo
+    let modelosParaTestar = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.5-pro", "gemini-1.0-pro"];
     if (modeloAtual) {
         modelosParaTestar = modelosParaTestar.filter(m => m !== modeloAtual);
         modelosParaTestar.unshift(modeloAtual);
     }
 
-    let erroFinal = null;
+    let ultimoErroAPI = "Desconhecido";
 
     for (const modelo of modelosParaTestar) {
         try {
-            console.log(`[VISAGISTA] Testando modelo: ${modelo}...`);
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${API_KEY}`;
-            
             const response = await fetch(url, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     contents: conteudoHistorico,
-                    generationConfig: { 
-                        temperature: 0.7, 
-                        maxOutputTokens: 8000 
-                    }
+                    generationConfig: { temperature: 0.7, maxOutputTokens: 8000 }
                 })
             });
 
             const data = await response.json();
 
-            // Pula para o próximo modelo se der erro 404 (Não existe) ou 429 (Sem cota)
+            // Se o Google recusar, guardamos o motivo exato e tentamos o próximo
             if (!response.ok) {
-                if ([404, 403, 429, 400].includes(response.status)) {
-                    console.warn(`[VISAGISTA] Modelo ${modelo} falhou (${response.status}). Pulando...`);
-                    continue; 
-                }
-                throw new Error(data.error?.message || "Erro na API");
+                ultimoErroAPI = `O Google recusou (${response.status}): ${data.error?.message || 'Sem detalhes'}`;
+                console.warn(`[VISAGISTA] ${modelo} falhou:`, ultimoErroAPI);
+                continue; 
             }
 
-            console.log(`✅ [VISAGISTA] Sucesso com o modelo: ${modelo}`);
-            return res.json({ 
-                sucesso: true, 
-                texto: data.candidates[0].content.parts[0].text, 
-                modeloAceito: modelo 
-            });
+            // Sucesso!
+            return res.json({ sucesso: true, texto: data.candidates[0].content.parts[0].text, modeloAceito: modelo });
 
         } catch (erro) {
-            erroFinal = erro;
+            ultimoErroAPI = erro.message;
         }
     }
     
-    res.status(500).json({ 
-        sucesso: false, 
-        erro: "Todos os modelos falharam. Erro interno: " + (erroFinal?.message || "Desconhecido")
-    });
+    // Se todos falharem, envia o erro EXATO para o seu console
+    res.status(500).json({ sucesso: false, erro: ultimoErroAPI });
 });
 // =================================================================
 
