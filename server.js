@@ -1887,8 +1887,8 @@ const MODEL_NAME = "gemini-2.5-flash"; // Atualizado para o modelo super rápido
             }
 
             // --- ENVIO ---
-            const LINK_CLOUDFLARE = "https://conviction-permissions-refresh-dist.trycloudflare.com"; 
-            const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b";
+const LINK_CLOUDFLARE = "https://shawnee-unexamined-leanna.ngrok-free.dev"; // Colei seu ngrok aqui!
+const API_KEY_EVO = "sjs04ji5xlvzb0bujyx6b"; // Mantenha essa se for a mesma do seu Evolution
 
             if (!respostaFinal) respostaFinal = "Erro interno.";
             respostaFinal = respostaFinal.replace(/undefined/g, "");
@@ -1902,7 +1902,7 @@ const MODEL_NAME = "gemini-2.5-flash"; // Atualizado para o modelo super rápido
                 console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
 
                 try {
-                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/king_bot`, {
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/KingAgenda`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                         body: JSON.stringify(body)
