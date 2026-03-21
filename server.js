@@ -1499,6 +1499,9 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const remoteJidLimpo = numeroRemetente.split('@')[0];
 
             // MEMÓRIA (40 MENSAGENS)
+            // ============================================================
+            // 🧠 CONFIGURAÇÃO UNIFICADA (MEMÓRIA, TOOLS E PERSONA)
+            // ============================================================
             const limitHistorico = 40; 
             const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
 
@@ -1517,19 +1520,78 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     historicoParaIA.unshift({ role: msg.role, parts: msg.parts });
                 }
             });
-            
+
+            // 🛠️ DEFINIÇÃO DAS FERRAMENTAS (O QUE ESTAVA FALTANDO!)
+            const tools = [{
+                "function_declarations": [
+                    {
+                        "name": "consultar_disponibilidade",
+                        "description": "Verifica profissionais livres em uma data e hora específica.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
+                            },
+                            "required": ["data", "horario"]
+                        }
+                    },
+                    {
+                        "name": "criar_agendamento",
+                        "description": "Cria um novo agendamento para o cliente.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
+                                "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
+                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                                "horario": { "type": "STRING", "description": "Horário HH:MM" },
+                                "servico": { "type": "STRING", "description": "Nome do serviço" }
+                            },
+                            "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
+                        }
+                    },
+                    {
+                        "name": "atualizar_agendamento",
+                        "description": "Altera um agendamento existente (data, hora, serviço ou profissional).",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento que será alterado." },
+                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
+                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
+                                "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
+                                "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional, caso queira trocar." }
+                            },
+                            "required": ["horarioAntigo"] 
+                        }
+                    },
+                    {
+                        "name": "cancelar_agendamento",
+                        "description": "Cancela um agendamento do próprio usuário.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "horariocancelar": { "type": "STRING", "description": "Horário do agendamento a cancelar" }
+                            }
+                        }
+                    }
+                ]
+            }];
+
+            // 🤖 PERSONA E MODELO (CONFORME VOCÊ PEDIU)
+            const API_KEY = process.env.GEMINI_API_KEY;
+            const MODEL_NAME = "gemini-2.5-flash"; // Mantendo seu modelo preferido
+
             const systemInstruction = {
                 parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
-                Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                REGRAS: 
+                Informe ao usuário que você é uma IA avançada. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+                
+                REGRAS:
                 - Só altere/cancele para o número ${remoteJidLimpo}.
-                - Se a função 'criar_agendamento' não retornar SUCESSO, você deve dizer que NÃO conseguiu marcar.
-                - NUNCA invente que agendou se a função falhar.` }]
+                - Se 'criar_agendamento' não retornar SUCESSO, diga que NÃO conseguiu marcar. Jamais invente confirmações.
+                - Para ATUALIZAR ou CANCELAR, use o 'horarioAntigo' informado pelo usuário.` }]
             };
-
-            const API_KEY = process.env.GEMINI_API_KEY;
-           
-            const MODEL_NAME = "gemini-2.5-flash"; 
 
             let respostaFinal = "";
 
