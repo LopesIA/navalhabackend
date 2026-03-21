@@ -1452,23 +1452,29 @@ app.post('/api/chat-visagista', async (req, res) => {
 });
 // =================================================================
 
-// --- WEBHOOK FINAL (KING AGENDA + FIX ÍNDICE FIREBASE + ATUALIZAÇÃO INTELIGENTE) ---
+const mensagensProcessadas = new Set();
+
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
-        console.log("[WEBHOOK] Requisição recebida!");
-        
-        // 🚀 CORREÇÃO 1: Avisa a Evolution IMEDIATAMENTE que você recebeu!
-        // Isso impede que ela dê timeout e tente enviar a mensagem de novo.
+        const data = req.body;
+        const msgId = data.data?.key?.id; // ID único da mensagem enviado pela Evolution
+
+        // 1. TRAVA DE DUPLICIDADE: Se já recebemos esse ID nos últimos 10s, ignoramos.
+        if (msgId && mensagensProcessadas.has(msgId)) {
+            return res.status(200).send('DUPLICATE_IGNORED');
+        }
+
+        // 2. RESPOSTA IMEDIATA: Avisa a Evolution que recebemos (única vez!)
         res.status(200).send('EVENT_RECEIVED');
 
-        const data = req.body;
-        const evento = data.event;
+        // Adiciona o ID na trava e remove após 10 segundos
+        if (msgId) {
+            mensagensProcessadas.add(msgId);
+            setTimeout(() => mensagensProcessadas.delete(msgId), 10000);
+        }
 
-        // 🚀 CORREÇÃO 2: Fallback de Segurança pro nome da Instância!
-        // IMPORTANTE: Altere "KingAgenda" abaixo para EXATAMENTE como está escrito 
-        // no seu painel do Evolution Manager (letras maiúsculas e minúsculas)
+        const evento = data.event;
         const nomeDaInstancia = data.instance || "KingAgenda"; 
-        console.log(`[DEBUG] Instância definida para URL: ${nomeDaInstancia}`);
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
@@ -1476,7 +1482,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-            // --- 🚨 FIX MIKAELA ---
+            // FIX MIKAELA
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 numeroRemetente = "5527996598623@s.whatsapp.net"; 
             }
@@ -1486,14 +1492,13 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 mensagem.extendedTextMessage?.text ||
                 mensagem.imageMessage?.caption || "";
 
-            if (!textoRecebido || fromMe) return;
+            // CORREÇÃO CRÍTICA: Removi o res.send daqui para não dar erro de duplicidade
+            if (!textoRecebido || fromMe) return; 
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
             const remoteJidLimpo = numeroRemetente.split('@')[0];
 
-            // ============================================================
-            // 🧠 MEMÓRIA E PERSONA (VERSÃO ÚNICA E CORRIGIDA)
-            // ============================================================
+            // MEMÓRIA (40 MENSAGENS)
             const limitHistorico = 40; 
             const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
 
@@ -1513,75 +1518,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 }
             });
 
-            // --- FERRAMENTAS (TOOLS) ---
-            const tools = [{
-                "function_declarations": [
-                    {
-                        "name": "consultar_disponibilidade",
-                        "description": "Verifica profissionais livres em uma data e hora específica.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
-                            },
-                            "required": ["data", "horario"]
-                        }
-                    },
-                    {
-                        "name": "criar_agendamento",
-                        "description": "Cria um novo agendamento para o cliente.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
-                                "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" },
-                                "servico": { "type": "STRING", "description": "Nome do serviço" }
-                            },
-                            "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
-                        }
-                    },
-                    {
-                        "name": "atualizar_agendamento",
-                        "description": "Altera um agendamento existente (data, hora, serviço ou profissional).",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento que será alterado." },
-                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
-                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
-                                "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
-                                "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional, caso queira trocar." }
-                            },
-                            "required": ["horarioAntigo"] 
-                        }
-                    },
-                    {
-                        "name": "cancelar_agendamento",
-                        "description": "Cancela um agendamento do próprio usuário.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "horariocancelar": { "type": "STRING", "description": "Horário do agendamento a cancelar" }
-                            }
-                        }
-                    }
-                ]
-            }];
+            // PERSONA E MODELO
+            const API_KEY = process.env.GEMINI_API_KEY;
+            const MODEL_NAME = "gemini-1.5-flash"; // Recomendo o 1.5 para evitar que a IA "minta" sobre o banco
 
-            // --- INSTRUÇÕES DO SISTEMA (PERSONA UNIFICADA - CORRIGIDO) ---
             const systemInstruction = {
                 parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
-                Informe ao usuário que você é uma inteligência artificial avançada de suporte.
                 Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                
-                REGRAS DE SEGURANÇA E OPERAÇÃO:
-                - Você só pode alterar ou cancelar agendamentos do número ${remoteJidLimpo}.
-                - Se o agendamento falhar ou o barbeiro não estiver disponível, diga EXATAMENTE o erro que a função retornou. 
-                - NUNCA confirme um agendamento se a função retornar um erro.
-                - Para ATUALIZAR/CANCELAR, identifique o horário antigo do usuário.` }]
+                REGRAS: 
+                - Só altere/cancele para o número ${remoteJidLimpo}.
+                - Se a função 'criar_agendamento' não retornar SUCESSO, você deve dizer que NÃO conseguiu marcar.
+                - NUNCA invente que agendou se a função falhar.` }]
             };
 
             const API_KEY = process.env.GEMINI_API_KEY;
