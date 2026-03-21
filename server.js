@@ -1905,21 +1905,41 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
             respostaFinal = respostaFinal.replace(/undefined/g, "");
 
             const enviarMensagem = async (destino) => {
+                // 1. Limpa o número para evitar que a Evolution rejeite
+                const numeroLimpo = destino.replace('@s.whatsapp.net', '');
+
+                // 2. Novo formato padrão da Evolution API v2
                 const body = {
-                    number: destino,
-                    textMessage: { text: respostaFinal }
+                    number: numeroLimpo,
+                    text: respostaFinal
                 };
                 
                 console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
 
                 try {
-                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/${nomeDaInstancia}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
-    body: JSON.stringify(body)
-});
+                    // 3. O encodeURIComponent garante que caracteres estranhos não quebrem a URL
+                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}`;
+                    
+                    const r = await fetch(urlEvo, {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json', 
+                            'apikey': API_KEY_EVO 
+                        },
+                        body: JSON.stringify(body)
+                    });
+                    
                     console.log(`[ZAP] Status envio: ${r.status}`);
-                } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
+
+                    // 🚨 4. SE DER ERRO, AGORA VAMOS SABER O MOTIVO EXATO!
+                    if (!r.ok) {
+                        const erroEvo = await r.text();
+                        console.error("[ZAP] A Evolution recusou! Motivo exato:", erroEvo);
+                    }
+
+                } catch (e) { 
+                    console.error("[ZAP] Erro no fetch:", e.message); 
+                }
             };
 
             await enviarMensagem(numeroRemetente);
