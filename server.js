@@ -912,7 +912,7 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (SUPORTE A DATAS FUTURAS + Fuso Brasil) ---
+// --- CRON JOB ATUALIZADO (SUPORTE A DATAS FUTURAS + Fuso Brasil + WHATSAPP) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
@@ -921,13 +921,36 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         return res.status(401).send('Unauthorized');
     }
 
-    console.log("[CRON] Iniciando ciclo de notificações (Fuso Brasil)...");
+    console.log("[CRON] Iniciando ciclo de notificações (Push + WhatsApp)...");
 
-    // 1. FORÇA A DATA PARA O FUSO DE SÃO PAULO
-    // Isso cria um objeto Date que representa a hora atual no Brasil
+    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
+    const enviarWhatsAppCron = async (destino, texto) => {
+        // Ignora se não houver telefone válido ou se for um agendamento marcado pelo dono na recepção
+        if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
+        
+        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
+        const API_KEY_EVO = "Ja997640401"; 
+        const nomeDaInstancia = "KingAgenda"; 
+
+        const numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+        const body = { number: numeroLimpo, text: texto };
+        
+        try {
+            const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}`;
+            const r = await fetch(urlEvo, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                body: JSON.stringify(body)
+            });
+            if (!r.ok) console.error("[CRON ZAP] Erro na Evolution:", await r.text());
+        } catch (e) {
+            console.error("[CRON ZAP] Erro no fetch:", e.message);
+        }
+    };
+
+    // Força a data para o fuso de São Paulo
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
 
-    // Helper para formatar YYYY-MM-DD no fuso correto
     const formatDateIso = (d) => {
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -940,10 +963,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
     try {
         // === 1. LEMBRETE DE 1 HORA ANTES ===
-        // Calcula o tempo futuro (Agora + 60min)
         const futuro1h = new Date(agoraBrasil.getTime() + 60 * 60 * 1000);
-        
-        // Extrai Horário (HH:MM) e Data (YYYY-MM-DD) do momento do lembrete
         const hora1h = `${String(futuro1h.getHours()).padStart(2,'0')}:${String(futuro1h.getMinutes()).padStart(2,'0')}`;
         const data1h = formatDateIso(futuro1h); 
         
@@ -952,16 +972,26 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         const snap1h = await db.collection('agendamentos')
             .where('status', 'in', ['confirmado', 'conclusão pendente'])
             .where('lembrete1hEnviado', '==', false)
-            .where('horario', '==', hora1h) // Bate o horário
-            .where('data', '==', data1h)     // <--- NOVO: Bate a data exata!
+            .where('horario', '==', hora1h) 
+            .where('data', '==', data1h)     
             .get();
 
-        snap1h.forEach(doc => {
+        // Usando o loop For...Of porque agora temos um envio assíncrono pro WhatsApp
+        for (const doc of snap1h.docs) {
             const ag = doc.data();
+            
+            // 1. Dispara a Notificação no App
             sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
+            
+            // 2. Dispara o WhatsApp 
+            if (ag.clienteTelefone) {
+                const msgZap = `⏰ *Lembrete King Agenda*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para lembrar que o seu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a 1 hora (às ${ag.horario}).\n\nTe esperamos lá! ✂️`;
+                await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+            }
+
             batch.update(doc.ref, { lembrete1hEnviado: true });
             contador++;
-        });
+        }
 
         // === 2. LEMBRETE DE 20 MINUTOS ANTES ===
         const futuro20min = new Date(agoraBrasil.getTime() + 20 * 60 * 1000);
@@ -972,24 +1002,29 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
         const snap20min = await db.collection('agendamentos')
             .where('status', 'in', ['confirmado', 'conclusão pendente'])
-            .where('lembrete10minEnviado', '==', false) // Campo legado (mantido nome original)
+            .where('lembrete10minEnviado', '==', false) 
             .where('horario', '==', hora20min)
-            .where('data', '==', data20min)  // <--- NOVO: Bate a data exata!
+            .where('data', '==', data20min)  
             .get();
 
-        snap20min.forEach(doc => {
+        for (const doc of snap20min.docs) {
             const ag = doc.data();
-            sendNotification(
-                ag.clienteUid, 
-                '🚀 É daqui a pouco!', 
-                `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app.`, 
-                { link: '#historico' }
-            );
+            
+            // 1. Dispara a Notificação no App
+            sendNotification(ag.clienteUid, '🚀 É daqui a pouco!', `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app.`, { link: '#historico' });
+            
+            // 2. Dispara o WhatsApp
+            if (ag.clienteTelefone) {
+                const msgZap = `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!\nCaso ocorra algum imprevisto, por favor nos avise.`;
+                await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+            }
+
             batch.update(doc.ref, { lembrete10minEnviado: true });
             contador++;
-        });
+        }
 
-        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) - Executa só as 10h da manhã ===
+        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) ===
+        // Executa só na janela das 10:00 da manhã
         if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
             const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
@@ -999,14 +1034,18 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 .limit(50) 
                 .get();
 
-            usuariosSumidos.forEach(doc => {
-                sendNotification(
-                    doc.id, 
-                    '✂️ Tá na hora do talento?', 
-                    `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, 
-                    { link: '#barbeiros' }
-                );
-            });
+            for (const doc of usuariosSumidos.docs) {
+                const uData = doc.data();
+                
+                // Push no App
+                sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+                
+                // Retenção no Zap
+                if (uData.telefone) {
+                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
+                    await enviarWhatsAppCron(uData.telefone, msgZap);
+                }
+            }
         }
 
         await batch.commit();
