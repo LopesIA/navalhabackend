@@ -1525,7 +1525,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     isProprietario = uData.isProprietario === true;
                     meuUid = userSnap.docs[0].id;
 
-                    // Se for o dono, puxa os nomes da equipe para a IA saber quem trabalha lá
                     if (isProprietario) {
                         const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
                         equipeSnap.forEach(doc => {
@@ -1533,7 +1532,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         });
                     }
                 } else {
-                    // Busca em agendamentos se não for usuário cadastrado
                     const agSnap = await db.collection('agendamentos').where('clienteTelefone', '==', remoteJidLimpo).orderBy('ts', 'desc').limit(1).get();
                     if (!agSnap.empty && agSnap.docs[0].data().clienteNome) {
                         nomeConhecido = agSnap.docs[0].data().clienteNome;
@@ -1576,20 +1574,20 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         "parameters": { 
                             "type": "OBJECT", 
                             "properties": {
-                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional (Apenas se o Chefe quiser ver a agenda de alguém específico)" }
+                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional" }
                             } 
                         }
                     },
                     {
                         "name": "consultar_disponibilidade",
-                        "description": "Verifica profissionais livres em uma data e hora específica.",
+                        "description": "Busca a lista de TODOS os horários livres de um barbeiro em uma data. Use OBRIGATORIAMENTE para mostrar opções ao cliente.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
                                 "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
+                                "barbeiroNome": { "type": "STRING", "description": "Nome do profissional" }
                             },
-                            "required": ["data", "horario"]
+                            "required": ["data", "barbeiroNome"]
                         }
                     },
                     {
@@ -1625,7 +1623,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     },
                     {
                         "name": "cancelar_agendamento",
-                        "description": "Cancela um agendamento específico (muda o status para cancelado).",
+                        "description": "Cancela um agendamento específico.",
                         "parameters": {
                             "type": "OBJECT",
                             "properties": {
@@ -1662,30 +1660,21 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             }];
 
             // ============================================================
-            // 🤖 PERSONA MUTA-FORMA (Muda de acordo com o Cargo)
+            // 🤖 PERSONA MUTA-FORMA
             // ============================================================
             let regrasCargos = "";
             if (isProprietario) {
-                regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão.
-                - PODER ABSOLUTO: Ele pode criar, alterar, listar, cancelar e excluir agendamentos de QUALQUER pessoa da equipe.
-                - EQUIPE: [${equipeNomes.join(', ')}].
-                - Quando ele pedir para listar ou alterar, pergunte de QUAL profissional da equipe ele quer ver a agenda (se ele não disser).
-                - Seja um assistente executivo ágil e direto.`;
+                regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão. EQUIPE: [${equipeNomes.join(', ')}]. Seja ágil e direto.`;
             } else if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
-                regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro).
-                - PODER DE AGENDA: Ele pode gerenciar (listar, alterar, cancelar, excluir) APENAS os horários da própria agenda dele.
-                - Ajude-o a encaixar clientes ou organizar os horários do dia. Seja ágil e focado na rotina de trabalho.`;
+                regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
-                regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE.
-                - ATENDIMENTO HUMANIZADO: Faça UMA pergunta por vez para ser natural.
-                - Siga este fluxo:
-                  1. Cumprimente amigavelmente e pergunte o Serviço.
-                  2. Pergunte a Data e Hora.
-                  3. Pergunte o Profissional de preferência.
-                  4. MUITO IMPORTANTE: Se o "Nome detectado" for "Desconhecido", peça o NOME da pessoa APENAS AGORA no final. Diga algo como: "Perfeito! Para eu registrar aqui, como você se chama?". Se já souber o nome, pule.
-                  5. Resuma tudo e peça a confirmação ("SIM").
-                  6. Só após o cliente confirmar, crie o agendamento.
-                - SEGURANÇA: Ele SÓ PODE gerenciar a própria agenda.`;
+                regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo:
+                  1. Pergunte o Serviço e o Profissional de preferência.
+                  2. Pergunte a Data.
+                  3. COM A DATA E PROFISSIONAL EM MÃOS, use 'consultar_disponibilidade' para buscar os horários livres. MOSTRE a lista de horários para ele escolher.
+                  4. Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte como ele se chama!
+                  5. Resuma os dados e peça a confirmação ("SIM").
+                  6. Agende apenas após o SIM.`;
             }
 
             const API_KEY = process.env.GEMINI_API_KEY;
@@ -1697,11 +1686,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO DAS FUNÇÕES:
-                1. NOME OBRIGATÓRIO: NUNCA use a palavra "Desconhecido" no campo clienteNome ao agendar. Se não tiver o nome, você é OBRIGADO a perguntar ao cliente antes de usar a função 'criar_agendamento'.
-                2. ATUALIZAR: Exija SEMPRE a Data e a Hora antigas para achar o horário correto.
-                3. EXCLUSÃO: 'cancelar_agendamento' desmarca. 'excluir_agendamento_definitivo' apaga totalmente.
-                4. VERDADE: Se uma função retornar 'erro', avise. Nunca invente que deu certo se o sistema recusou.` }]
+                REGRAS DE OURO:
+                1. ACAVALAMENTO: Os serviços duram em média 40 minutos. SEMPRE use 'consultar_disponibilidade' para ler a agenda real.
+                2. NOME OBRIGATÓRIO: NUNCA use a palavra "Desconhecido" no campo clienteNome ao agendar. Se não tiver o nome, pergunte!
+                3. VERDADE: Se a função retornar 'erro' (ex: horário ocupado), avise o cliente.` }]
             };
 
             let respostaFinal = "";
@@ -1734,7 +1722,13 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let functionResult = {};
                         let fallbackMsg = "";
 
-                        // === CHAVE MESTRA: GERADOR DE QUERY BASE ===
+                        // Função Mestra de Tempo (Transforma "HH:MM" em Minutos para calcular Acavalamento)
+                        const timeToMin = (t) => {
+                            if (!t) return 0;
+                            const [h, m] = t.split(':').map(Number);
+                            return h * 60 + m;
+                        };
+
                         let baseQuery = db.collection('agendamentos');
                         if (!isProprietario) { 
                             if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
@@ -1752,7 +1746,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (snap.empty) {
                                     functionResult = { msg: "Nenhum agendamento encontrado." };
-                                    fallbackMsg = "Nenhum agendamento encontrado no sistema para estes critérios.";
+                                    fallbackMsg = "Nenhum agendamento encontrado no sistema.";
                                 } else {
                                     let lista = [];
                                     const buscaNome = fnArgs.barbeiroAlvo ? fnArgs.barbeiroAlvo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : null;
@@ -1760,92 +1754,95 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     snap.forEach(doc => {
                                         const d = doc.data();
                                         const nomeBanco = (d.barbeiroNome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        
                                         if (!buscaNome || nomeBanco.includes(buscaNome)) {
                                             lista.push(`- Dia ${d.data} às ${d.horario}: ${d.servico} com ${d.barbeiroNome} (Cliente: ${d.clienteNome})`);
                                         }
                                     });
 
-                                    if (lista.length === 0) {
-                                        functionResult = { msg: `Nenhum agendamento para o profissional ${fnArgs.barbeiroAlvo}.` };
-                                        fallbackMsg = `A agenda do(a) ${fnArgs.barbeiroAlvo} está limpa.`;
-                                    } else {
-                                        functionResult = { status: "SUCESSO", agendamentos: lista };
-                                        fallbackMsg = "Agendamentos encontrados:\n" + lista.join("\n");
-                                    }
+                                    functionResult = { status: "SUCESSO", agendamentos: lista };
+                                    fallbackMsg = "Agendamentos encontrados:\n" + lista.join("\n");
                                 }
                             } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao listar."; }
                         }
 
-                        // 2. CONSULTAR DISPONIBILIDADE
+                        // 2. CONSULTAR DISPONIBILIDADE (A MÁGICA DOS HORÁRIOS LIVRES)
                         else if (fnName === "consultar_disponibilidade") {
-                             if (!fnArgs.horario || fnArgs.horario === "undefined") {
-                                functionResult = { erro: "Horário ausente." };
-                                fallbackMsg = "Qual horário você quer verificar?";
-                            } else {
-                                try {
-                                    let horarioBusca = fnArgs.horario;
-                                    if (horarioBusca.startsWith("0") && horarioBusca.length === 5) horarioBusca = horarioBusca.substring(1);
-                                    
-                                    const usuariosSnap = await db.collection('usuarios').get();
-                                    let profissionaisPorTipo = {};
+                            try {
+                                const allUsers = await db.collection('usuarios').get();
+                                let barbeiroEncontrado = null;
+                                const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-                                    usuariosSnap.forEach(doc => {
-                                        const d = doc.data();
-                                        const ehValido = d.agenda && (d.tipo !== 'admin' || d.isProprietario === true);
-
-                                        if (ehValido && d.agenda[horarioBusca] === true) {
-                                            let tipo = d.tipo || "Profissional";
-                                            tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1);
-                                            if (!profissionaisPorTipo[tipo]) profissionaisPorTipo[tipo] = [];
-                                            profissionaisPorTipo[tipo].push({ uid: doc.id, nome: d.nome });
+                                allUsers.forEach(doc => {
+                                    const d = doc.data();
+                                    const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
+                                    if (ehValido) { 
+                                        const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        if (nomeBanco.includes(nomeBusca)) {
+                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, agenda: d.agenda || {} };
                                         }
-                                    });
+                                    }
+                                });
 
-                                    let horarioAg = fnArgs.horario;
-                                    if (!horarioAg.startsWith("0") && horarioAg.length === 4) horarioAg = "0" + horarioAg;
-
+                                if (!barbeiroEncontrado) {
+                                    functionResult = { erro: "Profissional não encontrado." };
+                                    fallbackMsg = `Não achei o profissional ${fnArgs.barbeiroNome}.`;
+                                } else {
+                                    // Pega todos os agendamentos do dia
                                     const agSnap = await db.collection('agendamentos')
+                                        .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                         .where('data', '==', fnArgs.data)
-                                        .where('horario', '==', horarioAg)
+                                        .where('status', 'in', ['confirmado', 'conclusão pendente'])
                                         .get();
                                     
                                     const ocupados = [];
                                     agSnap.forEach(doc => {
                                         const ag = doc.data();
-                                        if (ag.status === 'confirmado' || ag.status === 'conclusão pendente') {
-                                            ocupados.push(ag.barbeiroUid);
-                                        }
+                                        ocupados.push({
+                                            inicio: timeToMin(ag.horario),
+                                            fim: timeToMin(ag.horario) + 40 // Duração base de 40min
+                                        });
                                     });
 
-                                    let textoResposta = [];
-                                    let totalLivres = 0;
-                                    for (const [categoria, lista] of Object.entries(profissionaisPorTipo)) {
-                                        const livres = lista.filter(p => !ocupados.includes(p.uid));
-                                        if (livres.length > 0) {
-                                            const nomes = livres.map(p => p.nome).join(", ");
-                                            textoResposta.push(`*${categoria}s:* ${nomes}`);
-                                            totalLivres += livres.length;
+                                    let horariosLivres = [];
+                                    
+                                    // Filtra a agenda do profissional verificando choques
+                                    for (const [horaTxt, taLivre] of Object.entries(barbeiroEncontrado.agenda)) {
+                                        if (taLivre) {
+                                            let horaFormatada = horaTxt;
+                                            if (horaFormatada.length === 4) horaFormatada = "0" + horaFormatada;
+                                            
+                                            const slotInicio = timeToMin(horaFormatada);
+                                            const slotFim = slotInicio + 40;
+
+                                            let temConflito = false;
+                                            for (const oc of ocupados) {
+                                                // Verifica intersecção (Acavalamento)
+                                                if (slotInicio < oc.fim && slotFim > oc.inicio) {
+                                                    temConflito = true;
+                                                    break;
+                                                }
+                                            }
+
+                                            if (!temConflito) horariosLivres.push(horaFormatada);
                                         }
                                     }
 
-                                    if (totalLivres > 0) {
-                                        const listaFinal = textoResposta.join("\n");
-                                        functionResult = { status: "LIVRE", detalhe: listaFinal };
-                                        fallbackMsg = `Profissionais livres às ${fnArgs.horario}:\n${listaFinal}`;
+                                    horariosLivres.sort();
+
+                                    if (horariosLivres.length > 0) {
+                                        functionResult = { status: "LIVRE", horarios: horariosLivres };
+                                        fallbackMsg = `Horários livres: ${horariosLivres.join(', ')}`;
                                     } else {
-                                        functionResult = { status: "OCUPADO" };
-                                        fallbackMsg = `Todos os profissionais estão ocupados às ${fnArgs.horario}.`;
+                                        functionResult = { status: "LOTADO" };
+                                        fallbackMsg = `Agenda lotada neste dia.`;
                                     }
-                                } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
-                            }
+                                }
+                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
                         }
 
-                        // 3. CRIAR AGENDAMENTO (BLINDADO COM EXPEDIENTE)
+                        // 3. CRIAR AGENDAMENTO (BLINDADO CONTRA ACAVALAMENTO)
                         else if (fnName === "criar_agendamento") {
                             try {
-                                console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
-                                
                                 const allUsers = await db.collection('usuarios').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1863,34 +1860,41 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (!barbeiroEncontrado) {
                                     functionResult = { erro: "Profissional não encontrado." };
-                                    fallbackMsg = `Não achei o profissional "${fnArgs.barbeiroNome}".`;
                                 } else {
                                     let horaFinal = fnArgs.horario;
                                     if (!horaFinal.startsWith("0") && horaFinal.length === 4) horaFinal = "0" + horaFinal;
                                     
                                     let horaBuscaAgenda = horaFinal;
-                                    if (horaBuscaAgenda.startsWith("0") && horaBuscaAgenda.length === 5) {
-                                        horaBuscaAgenda = horaBuscaAgenda.substring(1);
-                                    }
+                                    if (horaBuscaAgenda.startsWith("0") && horaBuscaAgenda.length === 5) horaBuscaAgenda = horaBuscaAgenda.substring(1);
 
-                                    // 🛡️ TRAVA 1: O profissional trabalha nesse horário?
+                                    // TRAVA 1: Expediente
                                     if (!barbeiroEncontrado.agenda || barbeiroEncontrado.agenda[horaBuscaAgenda] !== true) {
-                                        functionResult = { erro: "HORÁRIO FORA DO EXPEDIENTE. O profissional não atende nessa hora." };
-                                        fallbackMsg = `O profissional ${barbeiroEncontrado.nome} não atende às ${horaFinal}. Por favor, consulte os horários disponíveis.`;
+                                        functionResult = { erro: "HORÁRIO FORA DO EXPEDIENTE OU FECHADO." };
                                     } else {
-                                        // 🛡️ TRAVA 2: Esse horário já está ocupado por outro cliente?
+                                        // TRAVA 2: Acavalamento (Calcula Minutos)
                                         const conflitoSnap = await db.collection('agendamentos')
                                             .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                             .where('data', '==', fnArgs.data)
-                                            .where('horario', '==', horaFinal)
                                             .where('status', 'in', ['confirmado', 'conclusão pendente'])
                                             .get();
 
-                                        if (!conflitoSnap.empty) {
-                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO. Escolha outro." };
-                                            fallbackMsg = `Infelizmente o horário das ${horaFinal} já foi agendado por outra pessoa. Posso checar outras vagas?`;
+                                        const novoInicio = timeToMin(horaFinal);
+                                        const novoFim = novoInicio + 40; // O cliente que vai entrar gasta 40min
+                                        let temConflito = false;
+
+                                        conflitoSnap.forEach(doc => {
+                                            const ag = doc.data();
+                                            const ocInicio = timeToMin(ag.horario);
+                                            const ocFim = ocInicio + 40; // O cliente que já está lá gasta 40min
+                                            if (novoInicio < ocFim && novoFim > ocInicio) {
+                                                temConflito = true;
+                                            }
+                                        });
+
+                                        if (temConflito) {
+                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO OU INVADE O TEMPO DE OUTRO CLIENTE." };
                                         } else {
-                                            // ✅ PODE SALVAR NO BANCO!
+                                            // SALVAMENTO SEGURO
                                             const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
                                             let valorServico = 40; 
                                             let nomeServicoOficial = fnArgs.servico;
@@ -1934,11 +1938,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                             });
                                             
                                             functionResult = { status: "SUCESSO", valor: valorServico };
-                                            fallbackMsg = `✅ Agendado! ${nomeServicoOficial} com ${barbeiroEncontrado.nome} dia ${fnArgs.data} às ${horaFinal}.`;
                                         }
                                     }
                                 }
-                            } catch (e) { console.error(e); functionResult = { erro: "Erro ao gravar." }; fallbackMsg = "Erro ao agendar."; }
+                            } catch (e) { functionResult = { erro: "Erro ao agendar." }; }
                         }
 
                         // 4. ATUALIZAR AGENDAMENTO
@@ -1955,7 +1958,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (agSnap.empty) {
                                     functionResult = { erro: "Agendamento não encontrado ou sem permissão." };
-                                    fallbackMsg = `Não achei agendamento no dia ${fnArgs.dataAntiga} às ${fnArgs.horarioAntigo}.`;
                                 } else {
                                     const targetDoc = agSnap.docs[0];
                                     let novosDados = {};
@@ -1978,7 +1980,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                             const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                             if (nomeBanco.includes(busca)) { novoBarbeiro = { uid: uDoc.id, nome: u.nome }; }
                                         });
-
                                         if (novoBarbeiro) {
                                             novosDados.barbeiroUid = novoBarbeiro.uid;
                                             novosDados.barbeiroNome = novoBarbeiro.nome;
@@ -1986,13 +1987,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     }
 
                                     await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
-                                    functionResult = { status: "SUCESSO", msg: "Agendamento atualizado." };
-                                    fallbackMsg = `✅ Tudo certo! Atualizado com sucesso.`;
+                                    functionResult = { status: "SUCESSO", msg: "Atualizado." };
                                 }
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na atualização."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // 5. CANCELAR AGENDAMENTO (SOFT DELETE)
+                        // 5. CANCELAR AGENDAMENTO
                         else if (fnName === "cancelar_agendamento") {
                             try {
                                 let hCanc = fnArgs.horariocancelar;
@@ -2006,16 +2006,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (agSnap.empty) {
                                     functionResult = { erro: "Agendamento não encontrado ou sem permissão." };
-                                    fallbackMsg = "Não encontrei esse agendamento liberado para você cancelar.";
                                 } else {
                                     await db.collection('agendamentos').doc(agSnap.docs[0].id).update({ status: 'cancelado' });
                                     functionResult = { status: "CANCELADO" };
-                                    fallbackMsg = `✅ Cancelamento realizado com sucesso.`;
                                 }
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao cancelar."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // 6. EXCLUIR DEFINITIVO (HARD DELETE)
+                        // 6. EXCLUIR DEFINITIVO
                         else if (fnName === "excluir_agendamento_definitivo") {
                             try {
                                 let hCanc = fnArgs.horario;
@@ -2028,20 +2026,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (agSnap.empty) {
                                     functionResult = { erro: "Agendamento não encontrado para exclusão." };
-                                    fallbackMsg = `Não achei nenhum registro no dia ${fnArgs.data} às ${fnArgs.horario}.`;
                                 } else {
                                     await db.collection('agendamentos').doc(agSnap.docs[0].id).delete(); 
-                                    functionResult = { status: "SUCESSO", msg: "Apagado do banco." };
-                                    fallbackMsg = "✅ Feito! Apagado definitivamente do banco de dados.";
+                                    functionResult = { status: "SUCESSO", msg: "Apagado." };
                                 }
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao excluir do banco."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
                         // 7. ATUALIZAR NOME DO PERFIL
                         else if (fnName === "atualizar_meu_perfil") {
                             try {
                                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
-                                    
                                 if (userSnap.empty) {
                                     await db.collection('usuarios').add({
                                         telefone: remoteJidLimpo,
@@ -2053,8 +2048,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     await db.collection('usuarios').doc(userSnap.docs[0].id).update({ nome: fnArgs.novoNome });
                                 }
                                 functionResult = { status: "SUCESSO" };
-                                fallbackMsg = `✅ Pronto! Atualizei o nome para *${fnArgs.novoNome}*.`;
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao atualizar perfil."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
                         console.log("[IA] Resultado Real:", functionResult);
