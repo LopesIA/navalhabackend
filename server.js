@@ -1655,6 +1655,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             },
                             "required": ["novoNome"]
                         }
+                    },
+                    {
+                        "name": "consultar_gestao_financeira",
+                        "description": "Consulta o relatório financeiro e de desempenho (Entradas, Saídas, Saldo). Apenas o Chefe/Proprietário pode usar.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "periodo": { "type": "STRING", "description": "O período desejado: 'dia', 'semana' ou 'mes'." },
+                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional para filtrar. Se vazio, traz o total da barbearia." }
+                            },
+                            "required": ["periodo"]
+                        }
                     }
                 ]
             }];
@@ -1664,7 +1676,9 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             // ============================================================
             let regrasCargos = "";
             if (isProprietario) {
-                regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão. EQUIPE: [${equipeNomes.join(', ')}]. Seja ágil e direto.`;
+                regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão. EQUIPE: [${equipeNomes.join(', ')}]. 
+                - PODER DE GESTÃO: Ele pode pedir o desempenho e relatórios financeiros usando a função 'consultar_gestao_financeira'.
+                - Apresente os dados financeiros (Entradas, Saídas, Lucro) de forma super organizada, como um gerente financeiro reportando ao CEO.`;
             } else if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
                 regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
@@ -1737,6 +1751,13 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
                         };
 
+                        const getDateSafe = (field) => {
+                            if (!field) return null;
+                            if (typeof field.toDate === 'function') return field.toDate();
+                            if (field instanceof Date) return field;
+                            return new Date(field); 
+                        };
+
                         // Assíncrono para ler a subcoleção agenda_diaria
                         const getWorkingIntervals = async (barbeiro, dataStr) => {
                             let agendaDoDia = barbeiro.agenda || {};
@@ -1745,7 +1766,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiro.uid).collection('agenda_diaria').doc(dataStr).get();
                                 if (agendaDiariaDoc.exists) {
                                     const dadosDiarios = agendaDiariaDoc.data();
-                                    // Pega os horários caso você os salve direto no doc ou dentro de um mapa
                                     agendaDoDia = dadosDiarios.horarios || dadosDiarios; 
                                 }
                             } catch (e) {
@@ -1803,7 +1823,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (snap.empty) {
                                     functionResult = { msg: "Nenhum agendamento encontrado." };
-                                    fallbackMsg = "Nenhum agendamento encontrado no sistema.";
                                 } else {
                                     let lista = [];
                                     const buscaNome = fnArgs.barbeiroAlvo ? fnArgs.barbeiroAlvo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : null;
@@ -1817,12 +1836,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     });
 
                                     functionResult = { status: "SUCESSO", agendamentos: lista };
-                                    fallbackMsg = "Agendamentos encontrados:\n" + lista.join("\n");
                                 }
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao listar."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // === 2. CONSULTAR DISPONIBILIDADE (LÊ 100 AGENDAMENTOS E SUBCOLEÇÃO) ===
+                        // === 2. CONSULTAR DISPONIBILIDADE ===
                         else if (fnName === "consultar_disponibilidade") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
@@ -1842,15 +1860,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                                 if (!barbeiroEncontrado) {
                                     functionResult = { erro: "Profissional não encontrado." };
-                                    fallbackMsg = `Não achei o profissional ${fnArgs.barbeiroNome}.`;
                                 } else {
                                     const { intervals, baseSlots } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
                                     
                                     if (intervals.length === 0) {
                                         functionResult = { status: "FECHADO", msg: "Sem expediente neste dia." };
-                                        fallbackMsg = `A agenda do(a) ${barbeiroEncontrado.nome} está fechada no dia ${fnArgs.data}.`;
                                     } else {
-                                        // Puxa até 100 agendamentos para criar a matemática de colisão
                                         const agSnap = await db.collection('agendamentos')
                                             .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                             .where('data', '==', fnArgs.data)
@@ -1881,7 +1896,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         for (let slotInicio of sortedStarts) {
                                             if (isToday && slotInicio <= agoraMin) continue;
 
-                                            let slotFim = slotInicio + 40; // Simula a vaga de 40 min padrão
+                                            let slotFim = slotInicio + 40; 
                                             
                                             if (!isWithinWorkingHours(slotInicio, slotFim, intervals)) continue;
 
@@ -1893,24 +1908,20 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                                 }
                                             }
 
-                                            if (!temConflito) {
-                                                horariosLivres.push(minToTime(slotInicio));
-                                            }
+                                            if (!temConflito) horariosLivres.push(minToTime(slotInicio));
                                         }
 
                                         if (horariosLivres.length > 0) {
                                             functionResult = { status: "LIVRE", horarios: horariosLivres };
-                                            fallbackMsg = `Horários livres: ${horariosLivres.join(', ')}`;
                                         } else {
                                             functionResult = { status: "LOTADO" };
-                                            fallbackMsg = `Agenda totalmente lotada neste dia.`;
                                         }
                                     }
                                 }
-                            } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // === 3. CRIAR AGENDAMENTO (BLINDAGEM 100 LIMIT) ===
+                        // === 3. CRIAR AGENDAMENTO ===
                         else if (fnName === "criar_agendamento") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
@@ -1936,7 +1947,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     
                                     const novoInicio = timeToMin(horaFinal);
                                     
-                                    // Descobrir a duração real do serviço que ele quer
                                     const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
                                     let valorServico = 40; 
                                     let nomeServicoOficial = fnArgs.servico;
@@ -1958,7 +1968,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     }
 
                                     const novoFim = novoInicio + duracaoServicoFinal; 
-                                    
                                     const { intervals } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
 
                                     if (!isWithinWorkingHours(novoInicio, novoFim, intervals)) {
@@ -2017,7 +2026,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             } catch (e) { functionResult = { erro: "Erro ao agendar." }; }
                         }
 
-                        // === 4. ATUALIZAR AGENDAMENTO (BLINDADO) ===
+                        // === 4. ATUALIZAR AGENDAMENTO ===
                         else if (fnName === "atualizar_agendamento") {
                             try {
                                 let hAntigo = fnArgs.horarioAntigo;
@@ -2164,6 +2173,104 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     await db.collection('usuarios').doc(userSnap.docs[0].id).update({ nome: fnArgs.novoNome });
                                 }
                                 functionResult = { status: "SUCESSO" };
+                            } catch (e) { functionResult = { erro: e.message }; }
+                        }
+
+                        // === 8. CONSULTAR GESTÃO FINANCEIRA ===
+                        else if (fnName === "consultar_gestao_financeira") {
+                            try {
+                                if (!isProprietario && tipoUsuario !== 'admin') {
+                                    functionResult = { erro: "Acesso Negado. Apenas o Proprietário tem acesso ao relatório financeiro." };
+                                } else {
+                                    const periodo = fnArgs.periodo || 'dia';
+                                    const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+                                    let dataInicio = new Date(hoje);
+                                    
+                                    if (periodo === 'dia') {
+                                        dataInicio.setHours(0, 0, 0, 0);
+                                    } else if (periodo === 'semana') {
+                                        const diaDaSemana = hoje.getDay();
+                                        dataInicio.setDate(hoje.getDate() - diaDaSemana);
+                                        dataInicio.setHours(0, 0, 0, 0);
+                                    } else if (periodo === 'mes') {
+                                        dataInicio.setDate(1);
+                                        dataInicio.setHours(0, 0, 0, 0);
+                                    }
+
+                                    let targetUid = null;
+                                    let nomeAlvo = "Toda a Barbearia";
+                                    
+                                    if (fnArgs.barbeiroAlvo) {
+                                        const buscaNome = fnArgs.barbeiroAlvo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        const allUsers = await db.collection('usuarios').get();
+                                        allUsers.forEach(doc => {
+                                            const u = doc.data();
+                                            const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                            if (nomeBanco.includes(buscaNome)) {
+                                                targetUid = doc.id;
+                                                nomeAlvo = u.nome;
+                                            }
+                                        });
+                                    }
+
+                                    // Busca Agendamentos (Concluídos)
+                                    let queryAgendamentos = db.collection('agendamentos').where('status', 'in', ['concluido']);
+                                    const agSnap = await queryAgendamentos.get();
+                                    
+                                    let totalEntradas = 0;
+                                    let qtdServicos = 0;
+
+                                    agSnap.forEach(doc => {
+                                        const ag = doc.data();
+                                        let tsAgendamento = getDateSafe(ag.dataConclusaoFalsa) || getDateSafe(ag.dataConclusao) || getDateSafe(ag.ts);
+
+                                        if (tsAgendamento && tsAgendamento >= dataInicio && tsAgendamento <= hoje) {
+                                            if (targetUid && ag.barbeiroUid !== targetUid) return;
+                                            
+                                            let valor = Number(ag.valorFinalPago || ag.valor || 0);
+                                            totalEntradas += valor;
+                                            qtdServicos++;
+                                        }
+                                    });
+
+                                    // Busca Extrato Financeiro Manual
+                                    let queryExtrato = db.collection('extrato_financeiro');
+                                    const exSnap = await queryExtrato.get();
+                                    
+                                    let totalSaidas = 0;
+                                    let totalEntradasManuais = 0;
+
+                                    exSnap.forEach(doc => {
+                                        const ex = doc.data();
+                                        let tsExtrato = getDateSafe(ex.dataEvento) || getDateSafe(ex.ts);
+
+                                        if (tsExtrato && tsExtrato >= dataInicio && tsExtrato <= hoje) {
+                                            if (targetUid && ex.usuarioUid !== targetUid && ex.uidProfissional !== targetUid) return;
+                                            
+                                            let valor = Number(ex.valor || 0);
+                                            if (ex.tipo === 'saida' || ex.tipo === 'despesa') {
+                                                totalSaidas += valor;
+                                            } else if (ex.tipo === 'entrada') {
+                                                totalEntradasManuais += valor;
+                                            }
+                                        }
+                                    });
+
+                                    let somaTotalEntradas = totalEntradas + totalEntradasManuais;
+                                    let lucroLiquido = somaTotalEntradas - totalSaidas;
+
+                                    functionResult = { 
+                                        status: "SUCESSO", 
+                                        periodo: periodo,
+                                        profissionalAnalisado: nomeAlvo,
+                                        dadosFinanceiros: {
+                                            servicosRealizadosConcluidos: qtdServicos,
+                                            faturamentoServicos: somaTotalEntradas,
+                                            totalDespesasSaidas: totalSaidas,
+                                            lucroLiquidoFinal: lucroLiquido
+                                        }
+                                    };
+                                }
                             } catch (e) { functionResult = { erro: e.message }; }
                         }
 
