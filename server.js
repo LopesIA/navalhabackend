@@ -1531,6 +1531,9 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
+// 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS PARA NÃO TRAVAR A IA
+            if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) return;
+
             // FIX MIKAELA
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 numeroRemetente = "5527996598623@s.whatsapp.net"; 
@@ -1716,14 +1719,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let regrasCargos = "";
             if (isProprietario) {
                 regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão. EQUIPE: [${equipeNomes.join(', ')}]. 
-                - PODER DE GESTÃO: Ele pode pedir o desempenho e relatórios financeiros usando a função 'consultar_gestao_financeira'.
-                - Apresente os dados financeiros (Entradas, Saídas, Lucro) de forma super organizada, como um gerente financeiro reportando ao CEO.`;
+                - PODER DE GESTÃO: Ele pode pedir o desempenho financeiro usando 'consultar_gestao_financeira'.
+                - Seja direto, como um gerente reportando ao CEO.`;
             } else if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
                 regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
                 regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo:
                   1. Pergunte o Serviço e o Profissional de preferência.
-                  2. Pergunte a Data.
+                  2. Pergunte a Data. (IMPORTANTE: Se o cliente perguntar "quais dias tem livres?", explique amigavelmente que você precisa que ele sugira um dia específico, ex: "amanhã" ou "quinta-feira", para poder checar o sistema).
                   3. COM A DATA E PROFISSIONAL EM MÃOS, use 'consultar_disponibilidade' para buscar os horários livres. MOSTRE a lista de horários.
                   4. Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
                   5. Resuma os dados e peça a confirmação ("SIM").
@@ -1813,7 +1816,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 
                             let baseSlots = [];
                             for (const [horaTxt, taLivre] of Object.entries(agendaDoDia)) {
-                                if (taLivre === true) {
+                                // 🛠️ CORREÇÃO: Agora aceita boolean (true) ou texto ("true", "livre") do banco de dados!
+                                if (taLivre === true || String(taLivre).toLowerCase() === "true" || String(taLivre).toLowerCase() === "livre") {
                                     let hFormat = horaTxt.length === 4 ? "0" + horaTxt : horaTxt;
                                     baseSlots.push(timeToMin(hFormat));
                                 }
@@ -2377,8 +2381,8 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
             respostaFinal = respostaFinal.replace(/undefined/g, "");
 
             const enviarMensagem = async (destino) => {
-                // 1. Limpa o número para evitar que a Evolution rejeite
-                const numeroLimpo = destino.replace('@s.whatsapp.net', '');
+                // 1. 🛡️ EXTRAI APENAS OS NÚMEROS: Ignora @c.us, @s.whatsapp.net ou qualquer outra letra
+                const numeroLimpo = destino.split('@')[0].replace(/[^0-9]/g, '');
 
                 // 2. Novo formato padrão da Evolution API v2
                 const body = {
@@ -2386,10 +2390,9 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                     text: respostaFinal
                 };
                 
-                console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
+                console.log(`[ZAP] Enviando Payload para ${numeroLimpo}:`, JSON.stringify(body));
 
                 try {
-                    // 3. O encodeURIComponent garante que caracteres estranhos não quebrem a URL
                     const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}`;
                     
                     const r = await fetch(urlEvo, {
@@ -2403,7 +2406,6 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                     
                     console.log(`[ZAP] Status envio: ${r.status}`);
 
-                    // 🚨 4. SE DER ERRO, AGORA VAMOS SABER O MOTIVO EXATO!
                     if (!r.ok) {
                         const erroEvo = await r.text();
                         console.error("[ZAP] A Evolution recusou! Motivo exato:", erroEvo);
