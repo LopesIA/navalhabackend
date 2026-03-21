@@ -1486,7 +1486,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 mensagem.extendedTextMessage?.text ||
                 mensagem.imageMessage?.caption || "";
 
-            if (!textoRecebido || fromMe) return res.status(200).send('IGNORED');
+            if (!textoRecebido || fromMe) return;
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
             const remoteJidLimpo = numeroRemetente.split('@')[0];
@@ -1574,18 +1574,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             // --- INSTRUÇÕES DO SISTEMA (PERSONA UNIFICADA - CORRIGIDO) ---
             const systemInstruction = {
                 parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
-                Informe ao usuário que você é uma inteligência artificial avançada de suporte para a barbearia.
+                Informe ao usuário que você é uma inteligência artificial avançada de suporte.
                 Hoje é ${new Date().toLocaleDateString('pt-BR')}.
                 
-                REGRAS CRÍTICAS:
-                1. O nome do app é King Agenda.
-                2. SEGURANÇA: Você só pode alterar ou cancelar agendamentos que pertençam ao número ${remoteJidLimpo}.
-                3. TROCA DE PROFISSIONAL: Se o usuário quiser mudar de barbeiro, use a função 'atualizar_agendamento' informando o 'novoBarbeiroNome'.
-                4. ATUALIZAR/CANCELAR: Identifique qual agendamento o usuário quer mudar (pelo horário antigo) e preencha o campo 'horarioAntigo' na função.
-                5. CONFLITOS: Sempre verifique a disponibilidade antes de sugerir ou confirmar uma alteração.` }]
+                REGRAS DE SEGURANÇA E OPERAÇÃO:
+                - Você só pode alterar ou cancelar agendamentos do número ${remoteJidLimpo}.
+                - Se o agendamento falhar ou o barbeiro não estiver disponível, diga EXATAMENTE o erro que a função retornou. 
+                - NUNCA confirme um agendamento se a função retornar um erro.
+                - Para ATUALIZAR/CANCELAR, identifique o horário antigo do usuário.` }]
             };
 
             const API_KEY = process.env.GEMINI_API_KEY;
+           
             const MODEL_NAME = "gemini-2.5-flash"; 
 
             let respostaFinal = "";
