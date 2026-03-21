@@ -1517,11 +1517,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     historicoParaIA.unshift({ role: msg.role, parts: msg.parts });
                 }
             });
-
-            // PERSONA E MODELO
-            const API_KEY = process.env.GEMINI_API_KEY;
-            const MODEL_NAME = "gemini-1.5-flash"; // Recomendo o 1.5 para evitar que a IA "minta" sobre o banco
-
+            
             const systemInstruction = {
                 parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
                 Hoje é ${new Date().toLocaleDateString('pt-BR')}.
