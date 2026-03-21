@@ -1492,7 +1492,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             const remoteJidLimpo = numeroRemetente.split('@')[0];
 
             // ============================================================
-            // 🧠 MEMÓRIA E PERSONA (ATUALIZADO)
+            // 🧠 MEMÓRIA E PERSONA (VERSÃO ÚNICA E CORRIGIDA)
             // ============================================================
             const limitHistorico = 40; 
             const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
@@ -1571,16 +1571,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 ]
             }];
 
-            // --- INSTRUÇÕES DO SISTEMA (PERSONA) ---
+            // --- INSTRUÇÕES DO SISTEMA (PERSONA AVANÇADA) ---
             const systemInstruction = {
                 parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
-                Nas suas primeiras interações, informe ao usuário que você é uma inteligência artificial avançada de suporte para a barbearia.
+                Informe ao usuário que você é uma inteligência artificial avançada de suporte.
                 Hoje é ${new Date().toLocaleDateString('pt-BR')}.
                 
-                REGRAS CRÍTICAS:
-                - SEGURANÇA: Você só pode alterar ou cancelar agendamentos que pertençam ao número ${remoteJidLimpo}.
-                - TROCA DE PROFISSIONAL: Se o usuário quiser mudar de barbeiro, use a função 'atualizar_agendamento' e informe o 'novoBarbeiroNome'.
-                - CONFLITOS: Verifique a disponibilidade antes de sugerir ou confirmar uma alteração.` }]
+                REGRAS DE SEGURANÇA:
+                - Você só pode alterar ou cancelar agendamentos do número ${remoteJidLimpo}.
+                - Se o usuário quiser trocar de barbeiro, use 'atualizar_agendamento' com o 'novoBarbeiroNome'.
+                - Sempre verifique a disponibilidade antes de confirmar alterações.` }]
             };
 
             const API_KEY = process.env.GEMINI_API_KEY;
