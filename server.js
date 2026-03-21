@@ -932,7 +932,12 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         const API_KEY_EVO = "Ja997640401"; 
         const nomeDaInstancia = "KingAgenda"; 
 
-        const numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+        // 🛡️ Se for LID, manda inteiro. Se não for, extrai só os números.
+        let numeroLimpo = destino;
+        if (!destino.includes('@lid')) {
+            numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+        }
+        
         const body = { number: numeroLimpo, text: texto };
         
         try {
@@ -1547,7 +1552,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             if (!textoRecebido || fromMe) return; 
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
-            const remoteJidLimpo = numeroRemetente.split('@')[0];
+            
+            // 🛡️ TRATAMENTO DE SEGURANÇA PARA @LID (Contas Business)
+            let remoteJidLimpo = numeroRemetente.split('@')[0];
+            if (numeroRemetente.includes('@lid')) {
+                remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro para não perder o contato
+            }
 
             // ============================================================
             // 🔎 SUPER BUSCA: IDENTIDADE E CARGO (RBAC)
@@ -2381,12 +2391,15 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
             respostaFinal = respostaFinal.replace(/undefined/g, "");
 
             const enviarMensagem = async (destino) => {
-                // 1. 🛡️ EXTRAI APENAS OS NÚMEROS: Ignora @c.us, @s.whatsapp.net ou qualquer outra letra
-                const numeroLimpo = destino.split('@')[0].replace(/[^0-9]/g, '');
+                // 1. 🛡️ TRATAMENTO DE LIDs: Se o WhatsApp ocultou o número real, devolvemos para o @lid inteiro.
+                let numeroParaEnvio = destino;
+                if (!destino.includes('@lid')) {
+                    numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
+                }
 
                 // 2. Novo formato padrão da Evolution API v2
                 const body = {
-                    number: numeroLimpo,
+                    number: numeroParaEnvio,
                     text: respostaFinal
                 };
                 
