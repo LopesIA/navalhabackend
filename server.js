@@ -1457,7 +1457,9 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     try {
         console.log("[WEBHOOK] Requisição recebida!");
         const data = req.body;
-        const evento = data.event;
+const evento = data.event;
+// 👇 Adicione essa linha aqui para pegar o nome exato que a Evolution enviou:
+const nomeDaInstancia = data.instance;
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
@@ -1902,11 +1904,11 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                 console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
 
                 try {
-                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/KingAgenda`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
-                        body: JSON.stringify(body)
-                    });
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/${nomeDaInstancia}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+    body: JSON.stringify(body)
+});
                     console.log(`[ZAP] Status envio: ${r.status}`);
                 } catch (e) { console.error("[ZAP] Erro envio:", e.message); }
             };
