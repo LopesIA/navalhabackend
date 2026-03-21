@@ -1457,21 +1457,31 @@ const mensagensProcessadas = new Set();
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         const data = req.body;
-        const msgId = data.data?.key?.id; // ID único da mensagem enviado pela Evolution
+        
+        // --- 🛡️ BLINDAGEM ABSOLUTA CONTRA DUPLICATAS ---
+        // Pega o ID em todas as posições possíveis da Evolution
+        const msgId = data.data?.key?.id || data.data?.id || data.data?.messageId;
+        const textoTrava = data.data?.message?.conversation || data.data?.message?.extendedTextMessage?.text || "sem_texto";
+        const remetenteTrava = data.data?.key?.remoteJid || "desconhecido";
+        
+        // Se não vier ID nenhum, criamos um ID único com base em quem mandou e o que escreveu
+        const idTrava = msgId || `${remetenteTrava}-${textoTrava.substring(0, 15)}`;
 
-        // 1. TRAVA DE DUPLICIDADE: Se já recebemos esse ID nos últimos 10s, ignoramos.
-        if (msgId && mensagensProcessadas.has(msgId)) {
+        // Se esse ID já bateu aqui nos últimos 15 segundos, bloqueia na hora!
+        if (idTrava && mensagensProcessadas.has(idTrava)) {
+            console.log(`[TRAVA ATIVADA] Mensagem duplicada ignorada: ${idTrava}`);
             return res.status(200).send('DUPLICATE_IGNORED');
         }
 
-        // 2. RESPOSTA IMEDIATA: Avisa a Evolution que recebemos (única vez!)
+        // Responde a Evolution imediatamente para ela parar de mandar
         res.status(200).send('EVENT_RECEIVED');
 
-        // Adiciona o ID na trava e remove após 10 segundos
-        if (msgId) {
-            mensagensProcessadas.add(msgId);
-            setTimeout(() => mensagensProcessadas.delete(msgId), 10000);
+        if (idTrava) {
+            mensagensProcessadas.add(idTrava);
+            // Aumentei o tempo de trava para 15 segundos para dar tempo do Gemini responder tranquilo
+            setTimeout(() => mensagensProcessadas.delete(idTrava), 15000); 
         }
+        // ------------------------------------------------
 
         const evento = data.event;
         const nomeDaInstancia = data.instance || "KingAgenda"; 
@@ -1492,11 +1502,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 mensagem.extendedTextMessage?.text ||
                 mensagem.imageMessage?.caption || "";
 
-            // CORREÇÃO CRÍTICA: Removi o res.send daqui para não dar erro de duplicidade
             if (!textoRecebido || fromMe) return; 
 
             console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
             const remoteJidLimpo = numeroRemetente.split('@')[0];
+
 
             // MEMÓRIA (40 MENSAGENS)
             // ============================================================
