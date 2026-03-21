@@ -1566,7 +1566,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             });
 
             // ============================================================
-            // 🛠️ FERRAMENTAS COMPLETAS (ADAPTADAS PARA A CHAVE MESTRA)
+            // 🛠️ FERRAMENTAS COMPLETAS
             // ============================================================
             const tools = [{
                 "function_declarations": [
@@ -1677,8 +1677,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 - Ajude-o a encaixar clientes ou organizar os horários do dia. Seja ágil e focado na rotina de trabalho.`;
             } else {
                 regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE.
-                - ATENDIMENTO HUMANIZADO: Faça UMA pergunta por vez (1. Serviço -> 2. Data/Hora -> 3. Profissional).
-                - Resuma e peça um "Sim" antes de agendar.
+                - ATENDIMENTO HUMANIZADO: Faça UMA pergunta por vez para ser natural.
+                - Siga este fluxo:
+                  1. Cumprimente amigavelmente e pergunte o Serviço.
+                  2. Pergunte a Data e Hora.
+                  3. Pergunte o Profissional de preferência.
+                  4. MUITO IMPORTANTE: Se o "Nome detectado" for "Desconhecido", peça o NOME da pessoa APENAS AGORA no final. Diga algo como: "Perfeito! Para eu registrar aqui, como você se chama?". Se já souber o nome, pule.
+                  5. Resuma tudo e peça a confirmação ("SIM").
+                  6. Só após o cliente confirmar, crie o agendamento.
                 - SEGURANÇA: Ele SÓ PODE gerenciar a própria agenda.`;
             }
 
@@ -1687,14 +1693,15 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             const systemInstruction = {
                 parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                Telefone: ${remoteJidLimpo}. Nome: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
+                Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
                 ${regrasCargos}
 
                 REGRAS DE OURO DAS FUNÇÕES:
-                1. ATUALIZAR: Exija SEMPRE a Data e a Hora antigas para achar o horário correto.
-                2. EXCLUSÃO: 'cancelar_agendamento' apenas desmarca. 'excluir_agendamento_definitivo' apaga totalmente.
-                3. VERDADE: Se uma função retornar 'erro', avise. Nunca invente que deu certo se o sistema recusou.` }]
+                1. NOME OBRIGATÓRIO: NUNCA use a palavra "Desconhecido" no campo clienteNome ao agendar. Se não tiver o nome, você é OBRIGADO a perguntar ao cliente antes de usar a função 'criar_agendamento'.
+                2. ATUALIZAR: Exija SEMPRE a Data e a Hora antigas para achar o horário correto.
+                3. EXCLUSÃO: 'cancelar_agendamento' desmarca. 'excluir_agendamento_definitivo' apaga totalmente.
+                4. VERDADE: Se uma função retornar 'erro', avise. Nunca invente que deu certo se o sistema recusou.` }]
             };
 
             let respostaFinal = "";
@@ -1728,13 +1735,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let fallbackMsg = "";
 
                         // === CHAVE MESTRA: GERADOR DE QUERY BASE ===
-                        // Define em quais dados o usuário pode mexer, baseado no cargo
                         let baseQuery = db.collection('agendamentos');
-                        if (!isProprietario) { // Se não for o Dono, aplica travas
+                        if (!isProprietario) { 
                             if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
-                                baseQuery = baseQuery.where('barbeiroUid', '==', meuUid); // Barbeiro só mexe no dele
+                                baseQuery = baseQuery.where('barbeiroUid', '==', meuUid); 
                             } else {
-                                baseQuery = baseQuery.where('clienteTelefone', '==', remoteJidLimpo); // Cliente só mexe no dele
+                                baseQuery = baseQuery.where('clienteTelefone', '==', remoteJidLimpo); 
                             }
                         }
 
@@ -1755,7 +1761,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         const d = doc.data();
                                         const nomeBanco = (d.barbeiroNome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         
-                                        // O Chefe pode filtrar digitando o nome do barbeiro
                                         if (!buscaNome || nomeBanco.includes(buscaNome)) {
                                             lista.push(`- Dia ${d.data} às ${d.horario}: ${d.servico} com ${d.barbeiroNome} (Cliente: ${d.clienteNome})`);
                                         }
@@ -1774,7 +1779,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
                         // 2. CONSULTAR DISPONIBILIDADE
                         else if (fnName === "consultar_disponibilidade") {
-                            // (MANTIDA EXATAMENTE A MESMA LÓGICA ANTERIOR)
                              if (!fnArgs.horario || fnArgs.horario === "undefined") {
                                 functionResult = { erro: "Horário ausente." };
                                 fallbackMsg = "Qual horário você quer verificar?";
@@ -1837,9 +1841,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             }
                         }
 
-                        // 3. CRIAR AGENDAMENTO
+                        // 3. CRIAR AGENDAMENTO (BLINDADO COM EXPEDIENTE)
                         else if (fnName === "criar_agendamento") {
                             try {
+                                console.log(`[DB] Agendando para ${fnArgs.clienteNome}...`);
+                                
                                 const allUsers = await db.collection('usuarios').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1850,7 +1856,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (ehValido) { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50 };
+                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50, agenda: d.agenda };
                                         }
                                     }
                                 });
@@ -1859,54 +1865,78 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     functionResult = { erro: "Profissional não encontrado." };
                                     fallbackMsg = `Não achei o profissional "${fnArgs.barbeiroNome}".`;
                                 } else {
-                                    const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
-                                    let valorServico = 40; 
-                                    let nomeServicoOficial = fnArgs.servico;
-
-                                    if (!ownerSnap.empty) {
-                                        const ownerData = ownerSnap.docs[0].data();
-                                        const lista = ownerData.listaServicos || [];
-                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        const achado = lista.find(s => {
-                                            const nomeS = s.nome || s;
-                                            return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
-                                        });
-                                        if (achado) {
-                                            if (achado.valor) valorServico = Number(achado.valor);
-                                            nomeServicoOficial = achado.nome || achado;
-                                        }
-                                    }
-
-                                    const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
                                     let horaFinal = fnArgs.horario;
                                     if (!horaFinal.startsWith("0") && horaFinal.length === 4) horaFinal = "0" + horaFinal;
-
-                                    // Se o Barbeiro ou Dono estiver criando o horário pro cliente pelo zap dele:
-                                    const telefoneSalvar = (isProprietario || tipoUsuario === 'barbeiro') ? "whatsapp_gerencia" : remoteJidLimpo;
-
-                                    await db.collection('agendamentos').add({
-                                        barbeiroUid: barbeiroEncontrado.uid,
-                                        barbeiroNome: barbeiroEncontrado.nome,
-                                        clienteNome: fnArgs.clienteNome,
-                                        clienteTelefone: telefoneSalvar,
-                                        clienteUid: "whatsapp_guest",
-                                        data: fnArgs.data,
-                                        horario: horaFinal,
-                                        servico: nomeServicoOficial,
-                                        valor: valorServico,
-                                        valorOriginal: valorServico,
-                                        valorFinalPago: valorServico,
-                                        status: "confirmado",
-                                        origem: "whatsapp_bot",
-                                        ts: admin.firestore.FieldValue.serverTimestamp(),
-                                        visualizado: false,
-                                        comissaoCalculada: comissao,
-                                        percentualComissao: barbeiroEncontrado.percentual,
-                                        metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
-                                    });
                                     
-                                    functionResult = { status: "SUCESSO", valor: valorServico };
-                                    fallbackMsg = `✅ Agendado! ${nomeServicoOficial} com ${barbeiroEncontrado.nome} dia ${fnArgs.data} às ${horaFinal}.`;
+                                    let horaBuscaAgenda = horaFinal;
+                                    if (horaBuscaAgenda.startsWith("0") && horaBuscaAgenda.length === 5) {
+                                        horaBuscaAgenda = horaBuscaAgenda.substring(1);
+                                    }
+
+                                    // 🛡️ TRAVA 1: O profissional trabalha nesse horário?
+                                    if (!barbeiroEncontrado.agenda || barbeiroEncontrado.agenda[horaBuscaAgenda] !== true) {
+                                        functionResult = { erro: "HORÁRIO FORA DO EXPEDIENTE. O profissional não atende nessa hora." };
+                                        fallbackMsg = `O profissional ${barbeiroEncontrado.nome} não atende às ${horaFinal}. Por favor, consulte os horários disponíveis.`;
+                                    } else {
+                                        // 🛡️ TRAVA 2: Esse horário já está ocupado por outro cliente?
+                                        const conflitoSnap = await db.collection('agendamentos')
+                                            .where('barbeiroUid', '==', barbeiroEncontrado.uid)
+                                            .where('data', '==', fnArgs.data)
+                                            .where('horario', '==', horaFinal)
+                                            .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                            .get();
+
+                                        if (!conflitoSnap.empty) {
+                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO. Escolha outro." };
+                                            fallbackMsg = `Infelizmente o horário das ${horaFinal} já foi agendado por outra pessoa. Posso checar outras vagas?`;
+                                        } else {
+                                            // ✅ PODE SALVAR NO BANCO!
+                                            const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                                            let valorServico = 40; 
+                                            let nomeServicoOficial = fnArgs.servico;
+
+                                            if (!ownerSnap.empty) {
+                                                const ownerData = ownerSnap.docs[0].data();
+                                                const lista = ownerData.listaServicos || [];
+                                                const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                                const achado = lista.find(s => {
+                                                    const nomeS = s.nome || s;
+                                                    return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
+                                                });
+                                                if (achado) {
+                                                    if (achado.valor) valorServico = Number(achado.valor);
+                                                    nomeServicoOficial = achado.nome || achado;
+                                                }
+                                            }
+
+                                            const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
+                                            const telefoneSalvar = (typeof isProprietario !== 'undefined' && (isProprietario || tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional')) ? "whatsapp_gerencia" : remoteJidLimpo;
+
+                                            await db.collection('agendamentos').add({
+                                                barbeiroUid: barbeiroEncontrado.uid,
+                                                barbeiroNome: barbeiroEncontrado.nome,
+                                                clienteNome: fnArgs.clienteNome,
+                                                clienteTelefone: telefoneSalvar,
+                                                clienteUid: "whatsapp_guest",
+                                                data: fnArgs.data,
+                                                horario: horaFinal,
+                                                servico: nomeServicoOficial,
+                                                valor: valorServico,
+                                                valorOriginal: valorServico,
+                                                valorFinalPago: valorServico,
+                                                status: "confirmado",
+                                                origem: "whatsapp_bot",
+                                                ts: admin.firestore.FieldValue.serverTimestamp(),
+                                                visualizado: false,
+                                                comissaoCalculada: comissao,
+                                                percentualComissao: barbeiroEncontrado.percentual,
+                                                metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
+                                            });
+                                            
+                                            functionResult = { status: "SUCESSO", valor: valorServico };
+                                            fallbackMsg = `✅ Agendado! ${nomeServicoOficial} com ${barbeiroEncontrado.nome} dia ${fnArgs.data} às ${horaFinal}.`;
+                                        }
+                                    }
                                 }
                             } catch (e) { console.error(e); functionResult = { erro: "Erro ao gravar." }; fallbackMsg = "Erro ao agendar."; }
                         }
@@ -1917,7 +1947,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                 let hAntigo = fnArgs.horarioAntigo;
                                 if (hAntigo && !hAntigo.startsWith("0") && hAntigo.length === 4) hAntigo = "0" + hAntigo;
 
-                                // Usa a BaseQuery (já travada por cargo) + filtro de data e hora
                                 const agSnap = await baseQuery
                                     .where('data', '==', fnArgs.dataAntiga)
                                     .where('horario', '==', hAntigo)
