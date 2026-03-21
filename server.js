@@ -1523,75 +1523,83 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
             // 🛠️ DEFINIÇÃO DAS FERRAMENTAS (O QUE ESTAVA FALTANDO!)
             const tools = [{
-                "function_declarations": [
-                    {
-                        "name": "consultar_disponibilidade",
-                        "description": "Verifica profissionais livres em uma data e hora específica.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
-                            },
-                            "required": ["data", "horario"]
-                        }
-                    },
-                    {
-                        "name": "criar_agendamento",
-                        "description": "Cria um novo agendamento para o cliente.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
-                                "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" },
-                                "servico": { "type": "STRING", "description": "Nome do serviço" }
-                            },
-                            "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
-                        }
-                    },
-                    {
-                        "name": "atualizar_agendamento",
-                        "description": "Altera um agendamento existente (data, hora, serviço ou profissional).",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento que será alterado." },
-                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
-                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
-                                "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
-                                "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional, caso queira trocar." }
-                            },
-                            "required": ["horarioAntigo"] 
-                        }
-                    },
-                    {
-                        "name": "cancelar_agendamento",
-                        "description": "Cancela um agendamento do próprio usuário.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "horariocancelar": { "type": "STRING", "description": "Horário do agendamento a cancelar" }
-                            }
-                        }
-                    }
-                ]
-            }];
+    "function_declarations": [
+        {
+            "name": "listar_meus_agendamentos",
+            "description": "Busca e lista TODOS os agendamentos confirmados vinculados ao telefone do usuário.",
+            "parameters": { "type": "OBJECT", "properties": {} }
+        },
+        {
+            "name": "consultar_disponibilidade",
+            "description": "Verifica profissionais livres em uma data e hora específica.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                    "horario": { "type": "STRING", "description": "Horário HH:MM" }
+                },
+                "required": ["data", "horario"]
+            }
+        },
+        {
+            "name": "criar_agendamento",
+            "description": "Cria um novo agendamento para o cliente.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
+                    "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
+                    "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                    "horario": { "type": "STRING", "description": "Horário HH:MM" },
+                    "servico": { "type": "STRING", "description": "Nome do serviço" }
+                },
+                "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
+            }
+        },
+        {
+            "name": "atualizar_agendamento",
+            "description": "Altera um agendamento existente (data, hora, serviço ou profissional).",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento que será alterado." },
+                    "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
+                    "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
+                    "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
+                    "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional, caso queira trocar." }
+                },
+                "required": ["horarioAntigo"] 
+            }
+        },
+        {
+            "name": "cancelar_agendamento",
+            "description": "Cancela um agendamento específico do próprio usuário.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "data": { "type": "STRING", "description": "Data do agendamento YYYY-MM-DD" },
+                    "horariocancelar": { "type": "STRING", "description": "Horário do agendamento a cancelar HH:MM" }
+                },
+                "required": ["data", "horariocancelar"]
+            }
+        }
+    ]
+}];
 
             // 🤖 PERSONA E MODELO (CONFORME VOCÊ PEDIU)
             const API_KEY = process.env.GEMINI_API_KEY;
             const MODEL_NAME = "gemini-2.5-flash"; // Mantendo seu modelo preferido
 
             const systemInstruction = {
-                parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
-                Informe ao usuário que você é uma IA avançada. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
-                
-                REGRAS:
-                - Só altere/cancele para o número ${remoteJidLimpo}.
-                - Se 'criar_agendamento' não retornar SUCESSO, diga que NÃO conseguiu marcar. Jamais invente confirmações.
-                - Para ATUALIZAR ou CANCELAR, use o 'horarioAntigo' informado pelo usuário.` }]
-            };
+    parts: [{ text: `Você é a IA de Suporte Avançado do King Agenda. 
+    Informe ao usuário que você é uma inteligência artificial avançada de suporte para a barbearia. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+    
+    REGRAS DE OURO:
+    1. SEGURANÇA TOTAL: Você só pode acessar, listar ou cancelar dados vinculados ao número ${remoteJidLimpo}. Jamais acesse dados de terceiros.
+    2. CONSULTA DE AGENDA: Sempre que o usuário perguntar "quais são meus horários", "o que tenho marcado" ou "verifica meus agendamentos", use a função 'listar_meus_agendamentos' para trazer TODOS os resultados confirmados.
+    3. CANCELAMENTO PRECISO: Para cancelar, você deve identificar ou solicitar a DATA e o HORÁRIO exato. O cancelamento só será validado se o telefone bater com o registro no banco.
+    4. COMPROMISSO COM A VERDADE: Se uma função retornar 'erro' ou 'Agendamento não encontrado', informe isso ao usuário. NUNCA confirme um cancelamento ou agendamento se a função falhar internamente.` }]
+};
 
             let respostaFinal = "";
 
