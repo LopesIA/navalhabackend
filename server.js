@@ -1687,7 +1687,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 ${regrasCargos}
 
                 REGRAS DE OURO:
-                1. ACAVALAMENTO: Os serviços duram em média 40 minutos. SEMPRE use 'consultar_disponibilidade' para ler a agenda real matemática e mostre ao cliente apenas os horários livres que o sistema te retornar.
+                1. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade'. O sistema vai cruzar a subcoleção agenda_diaria com os últimos 100 agendamentos para criar os blocos matemáticos de tempo livre.
                 2. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!
                 3. VERDADE: Se a função retornar 'erro' (ex: horário lotado ou fora do expediente), avise o cliente e não force o agendamento.` }]
             };
@@ -1723,7 +1723,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let fallbackMsg = "";
 
                         // ============================================================
-                        // ⚙️ MOTORES MATEMÁTICOS DE TEMPO E EXPEDIENTE
+                        // ⚙️ MOTORES MATEMÁTICOS (Com Subcoleção Agenda Diária)
                         // ============================================================
                         const timeToMin = (t) => {
                             if (!t) return 0;
@@ -1737,16 +1737,24 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
                         };
 
-                        // Puxa a agenda do dia e cria blocos de trabalho reais (Intervalos)
-                        const getWorkingIntervals = (barbeiro, dataStr) => {
-                            // PRIORIDADE 1: agenda_diaria. PRIORIDADE 2: agenda fixa
-                            let agendaDoDia = barbeiro.agenda_diaria && barbeiro.agenda_diaria[dataStr] 
-                                ? barbeiro.agenda_diaria[dataStr] 
-                                : barbeiro.agenda || {};
+                        // Assíncrono para ler a subcoleção agenda_diaria
+                        const getWorkingIntervals = async (barbeiro, dataStr) => {
+                            let agendaDoDia = barbeiro.agenda || {};
+
+                            try {
+                                const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiro.uid).collection('agenda_diaria').doc(dataStr).get();
+                                if (agendaDiariaDoc.exists) {
+                                    const dadosDiarios = agendaDiariaDoc.data();
+                                    // Pega os horários caso você os salve direto no doc ou dentro de um mapa
+                                    agendaDoDia = dadosDiarios.horarios || dadosDiarios; 
+                                }
+                            } catch (e) {
+                                console.log("[DB] Sem agenda_diaria especial para o dia, usando agenda fixa.");
+                            }
                                 
                             let baseSlots = [];
                             for (const [horaTxt, taLivre] of Object.entries(agendaDoDia)) {
-                                if (taLivre) {
+                                if (taLivre === true) {
                                     let hFormat = horaTxt.length === 4 ? "0" + horaTxt : horaTxt;
                                     baseSlots.push(timeToMin(hFormat));
                                 }
@@ -1756,10 +1764,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             let intervals = [];
                             if (baseSlots.length > 0) {
                                 let start = baseSlots[0];
-                                let end = baseSlots[0] + 30; // Assumindo base 30 min da agenda original
+                                let end = baseSlots[0] + 30; 
                                 for (let i = 1; i < baseSlots.length; i++) {
                                     if (baseSlots[i] === end) {
-                                        end += 30; // Extende o bloco de trabalho
+                                        end += 30; 
                                     } else if (baseSlots[i] > end) {
                                         intervals.push({ start, end });
                                         start = baseSlots[i];
@@ -1771,7 +1779,6 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             return { intervals, baseSlots };
                         };
 
-                        // Checa se o serviço [start a end] cabe 100% dentro de um bloco de trabalho
                         const isWithinWorkingHours = (start, end, intervals) => {
                             for (let iv of intervals) {
                                 if (start >= iv.start && end <= iv.end) return true;
@@ -1815,7 +1822,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro ao listar."; }
                         }
 
-                        // === 2. CONSULTAR DISPONIBILIDADE (COM ACAVALAMENTO DINÂMICO) ===
+                        // === 2. CONSULTAR DISPONIBILIDADE (LÊ 100 AGENDAMENTOS E SUBCOLEÇÃO) ===
                         else if (fnName === "consultar_disponibilidade") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
@@ -1828,7 +1835,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (ehValido) { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, agenda: d.agenda || {}, agenda_diaria: d.agenda_diaria || {} };
+                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, agenda: d.agenda || {} };
                                         }
                                     }
                                 });
@@ -1837,18 +1844,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     functionResult = { erro: "Profissional não encontrado." };
                                     fallbackMsg = `Não achei o profissional ${fnArgs.barbeiroNome}.`;
                                 } else {
-                                    // Pega os intervalos reais de trabalho do dia e os slots iniciais (ex: 08:00, 08:30)
-                                    const { intervals, baseSlots } = getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
+                                    const { intervals, baseSlots } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
                                     
                                     if (intervals.length === 0) {
                                         functionResult = { status: "FECHADO", msg: "Sem expediente neste dia." };
                                         fallbackMsg = `A agenda do(a) ${barbeiroEncontrado.nome} está fechada no dia ${fnArgs.data}.`;
                                     } else {
-                                        // Busca agendamentos ocupados no dia
+                                        // Puxa até 100 agendamentos para criar a matemática de colisão
                                         const agSnap = await db.collection('agendamentos')
                                             .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                             .where('data', '==', fnArgs.data)
                                             .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                            .limit(100)
                                             .get();
                                         
                                         const ocupados = [];
@@ -1857,15 +1864,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         agSnap.forEach(doc => {
                                             const ag = doc.data();
                                             let inicio = timeToMin(ag.horario);
-                                            let duracao = 40; // Serviço padrão 40 min
+                                            let duracao = ag.duracao ? Number(ag.duracao) : 40; 
                                             let fim = inicio + duracao;
                                             ocupados.push({ inicio, fim });
-                                            potentialStarts.add(fim); // O fim de um corte vira um novo horário possível! (Ex: 11:40)
+                                            potentialStarts.add(fim); 
                                         });
 
                                         let sortedStarts = Array.from(potentialStarts).sort((a, b) => a - b);
                                         
-                                        // Trava do passado (se for o dia de hoje, não mostra horário que já passou)
                                         const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
                                         const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
                                         const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
@@ -1875,12 +1881,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                         for (let slotInicio of sortedStarts) {
                                             if (isToday && slotInicio <= agoraMin) continue;
 
-                                            let slotFim = slotInicio + 40; // Testa com 40 min
+                                            let slotFim = slotInicio + 40; // Simula a vaga de 40 min padrão
                                             
-                                            // Trava 1: Cabe no horário de trabalho / almoço do cara?
                                             if (!isWithinWorkingHours(slotInicio, slotFim, intervals)) continue;
 
-                                            // Trava 2: Acavala com outro agendamento?
                                             let temConflito = false;
                                             for (const oc of ocupados) {
                                                 if (slotInicio < oc.fim && slotFim > oc.inicio) {
@@ -1906,7 +1910,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             } catch (e) { functionResult = { erro: e.message }; fallbackMsg = "Erro na consulta."; }
                         }
 
-                        // === 3. CRIAR AGENDAMENTO (COM BLINDAGEM DE ACAVALAMENTO) ===
+                        // === 3. CRIAR AGENDAMENTO (BLINDAGEM 100 LIMIT) ===
                         else if (fnName === "criar_agendamento") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
@@ -1919,7 +1923,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (ehValido) { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50, agenda: d.agenda, agenda_diaria: d.agenda_diaria };
+                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, percentual: d.percentualComissao || 50, agenda: d.agenda };
                                         }
                                     }
                                 });
@@ -1931,53 +1935,56 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (!horaFinal.startsWith("0") && horaFinal.length === 4) horaFinal = "0" + horaFinal;
                                     
                                     const novoInicio = timeToMin(horaFinal);
-                                    const novoFim = novoInicio + 40; 
                                     
-                                    const { intervals } = getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
+                                    // Descobrir a duração real do serviço que ele quer
+                                    const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                                    let valorServico = 40; 
+                                    let nomeServicoOficial = fnArgs.servico;
+                                    let duracaoServicoFinal = 40;
 
-                                    // TRAVA 1: Expediente Real
+                                    if (!ownerSnap.empty) {
+                                        const ownerData = ownerSnap.docs[0].data();
+                                        const lista = ownerData.listaServicos || [];
+                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        const achado = lista.find(s => {
+                                            const nomeS = s.nome || s;
+                                            return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
+                                        });
+                                        if (achado) {
+                                            if (achado.valor) valorServico = Number(achado.valor);
+                                            if (achado.duracao) duracaoServicoFinal = Number(achado.duracao);
+                                            nomeServicoOficial = achado.nome || achado;
+                                        }
+                                    }
+
+                                    const novoFim = novoInicio + duracaoServicoFinal; 
+                                    
+                                    const { intervals } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
+
                                     if (!isWithinWorkingHours(novoInicio, novoFim, intervals)) {
-                                        functionResult = { erro: "O horário escolhido está fora do expediente ou invade o horário de almoço/fechamento." };
+                                        functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
                                     } else {
-                                        // TRAVA 2: Acavalamento
                                         const conflitoSnap = await db.collection('agendamentos')
                                             .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                             .where('data', '==', fnArgs.data)
                                             .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                            .limit(100)
                                             .get();
 
                                         let temConflito = false;
                                         conflitoSnap.forEach(doc => {
                                             const ag = doc.data();
                                             const ocInicio = timeToMin(ag.horario);
-                                            const ocFim = ocInicio + 40; 
+                                            const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
+                                            const ocFim = ocInicio + ocDuracao; 
                                             if (novoInicio < ocFim && novoFim > ocInicio) {
                                                 temConflito = true;
                                             }
                                         });
 
                                         if (temConflito) {
-                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO (Acavalamento). Este período já tem dono." };
+                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO (Acavalamento detectado)." };
                                         } else {
-                                            // SALVAMENTO SEGURO
-                                            const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
-                                            let valorServico = 40; 
-                                            let nomeServicoOficial = fnArgs.servico;
-
-                                            if (!ownerSnap.empty) {
-                                                const ownerData = ownerSnap.docs[0].data();
-                                                const lista = ownerData.listaServicos || [];
-                                                const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                                const achado = lista.find(s => {
-                                                    const nomeS = s.nome || s;
-                                                    return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
-                                                });
-                                                if (achado) {
-                                                    if (achado.valor) valorServico = Number(achado.valor);
-                                                    nomeServicoOficial = achado.nome || achado;
-                                                }
-                                            }
-
                                             const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
                                             const telefoneSalvar = (typeof isProprietario !== 'undefined' && (isProprietario || tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional')) ? "whatsapp_gerencia" : remoteJidLimpo;
 
@@ -1990,6 +1997,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                                 data: fnArgs.data,
                                                 horario: horaFinal,
                                                 servico: nomeServicoOficial,
+                                                duracao: duracaoServicoFinal,
                                                 valor: valorServico,
                                                 valorOriginal: valorServico,
                                                 valorFinalPago: valorServico,
@@ -2051,27 +2059,29 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                                     if (!barbeiroObjCompleto) {
                                         functionResult = { erro: "Profissional destino não encontrado." };
                                     } else {
-                                        // VALIDAÇÃO DE TEMPO NA ATUALIZAÇÃO
+                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 40;
                                         const novoInicio = timeToMin(novoHorarioFinal);
-                                        const novoFim = novoInicio + 40; 
+                                        const novoFim = novoInicio + duracaoServ; 
                                         
-                                        const { intervals } = getWorkingIntervals(barbeiroObjCompleto, novaDataFinal);
+                                        const { intervals } = await getWorkingIntervals(barbeiroObjCompleto, novaDataFinal);
 
                                         if (!isWithinWorkingHours(novoInicio, novoFim, intervals)) {
-                                            functionResult = { erro: "O novo horário está fora do expediente." };
+                                            functionResult = { erro: "O novo horário está fora do expediente da agenda_diaria." };
                                         } else {
                                             const conflitoSnap = await db.collection('agendamentos')
                                                 .where('barbeiroUid', '==', novoBarbeiroUid)
                                                 .where('data', '==', novaDataFinal)
                                                 .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                                .limit(100)
                                                 .get();
 
                                             let temConflito = false;
                                             conflitoSnap.forEach(doc => {
-                                                if (doc.id !== targetDoc.id) { // Ignora ele mesmo!
+                                                if (doc.id !== targetDoc.id) { 
                                                     const ag = doc.data();
                                                     const ocInicio = timeToMin(ag.horario);
-                                                    const ocFim = ocInicio + 40; 
+                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
+                                                    const ocFim = ocInicio + ocDuracao; 
                                                     if (novoInicio < ocFim && novoFim > ocInicio) {
                                                         temConflito = true;
                                                     }
