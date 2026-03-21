@@ -1902,7 +1902,7 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                 console.log(`[ZAP] Enviando Payload:`, JSON.stringify(body));
 
                 try {
-                    const r = await fetch(`https://evolution-king-agenda.onrender.com/message/sendText/KingAgenda`, {
+                    const r = await fetch(`${LINK_CLOUDFLARE}/message/sendText/KingAgenda`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                         body: JSON.stringify(body)
