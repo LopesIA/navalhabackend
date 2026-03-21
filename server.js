@@ -1456,10 +1456,19 @@ app.post('/api/chat-visagista', async (req, res) => {
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         console.log("[WEBHOOK] Requisição recebida!");
+        
+        // 🚀 CORREÇÃO 1: Avisa a Evolution IMEDIATAMENTE que você recebeu!
+        // Isso impede que ela dê timeout e tente enviar a mensagem de novo.
+        res.status(200).send('EVENT_RECEIVED');
+
         const data = req.body;
-const evento = data.event;
-// 👇 Adicione essa linha aqui para pegar o nome exato que a Evolution enviou:
-const nomeDaInstancia = data.instance;
+        const evento = data.event;
+
+        // 🚀 CORREÇÃO 2: Fallback de Segurança pro nome da Instância!
+        // IMPORTANTE: Altere "KingAgenda" abaixo para EXATAMENTE como está escrito 
+        // no seu painel do Evolution Manager (letras maiúsculas e minúsculas)
+        const nomeDaInstancia = data.instance || "KingAgenda"; 
+        console.log(`[DEBUG] Instância definida para URL: ${nomeDaInstancia}`);
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
             const mensagem = data.data.message;
@@ -1915,7 +1924,7 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
 
             await enviarMensagem(numeroRemetente);
         }
-        res.status(200).send('EVENT_RECEIVED');
+        
     } catch (error) {
         console.error("Erro no Webhook:", error);
         res.status(200).send("Erro processado");
