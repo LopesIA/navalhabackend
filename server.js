@@ -1632,8 +1632,35 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         let functionResult = {};
                         let fallbackMsg = "";
 
+                        // === LISTAR MEUS AGENDAMENTOS ===
+                        if (fnName === "listar_meus_agendamentos") {
+                            try {
+                                console.log(`[DB] Listando agendamentos para ${remoteJidLimpo}...`);
+                                const snap = await db.collection('agendamentos')
+                                    .where('clienteTelefone', '==', remoteJidLimpo)
+                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                    .get();
+
+                                if (snap.empty) {
+                                    functionResult = { msg: "Você não possui agendamentos." };
+                                    fallbackMsg = "Você não tem nenhum agendamento marcado no momento.";
+                                } else {
+                                    let lista = [];
+                                    snap.forEach(doc => {
+                                        const d = doc.data();
+                                        lista.push(`- ${d.servico} com ${d.barbeiroNome} em ${d.data} às ${d.horario}`);
+                                    });
+                                    functionResult = { status: "SUCESSO", agendamentos: lista };
+                                    fallbackMsg = "Seus agendamentos são:\n" + lista.join("\n");
+                                }
+                            } catch (e) { 
+                                functionResult = { erro: e.message }; 
+                                fallbackMsg = "Erro ao buscar seus agendamentos."; 
+                            }
+                        }
+
                         // === CONSULTAR ===
-                        if (fnName === "consultar_disponibilidade") {
+                        else if (fnName === "consultar_disponibilidade") {
                              if (!fnArgs.horario || fnArgs.horario === "undefined") {
                                 functionResult = { erro: "Horário ausente." };
                                 fallbackMsg = "Qual horário você quer verificar?";
