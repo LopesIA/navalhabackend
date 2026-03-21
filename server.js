@@ -1887,7 +1887,7 @@ const MODEL_NAME = "gemini-2.5-flash"; // Atualizado para o modelo super rápido
             }
 
             // --- ENVIO ---
-const LINK_CLOUDFLARE = "https://shawnee-unexamined-leanna.ngrok-free.dev"; // Colei seu ngrok aqui!
+const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com/instance"; // Colei seu ngrok aqui!
 const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolution
 
             if (!respostaFinal) respostaFinal = "Erro interno.";
