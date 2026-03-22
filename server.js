@@ -1989,22 +1989,29 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                                     let almocoOut = timeToMin(barbeiroEncontrado.almocoFim || "13:00");
                                     if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
                                     
+                                    // 3. HIERARQUIA DE AGENDA (A mágica do Fallback)
                                     let usaAgendaManual = barbeiroEncontrado.usaAgendaManual === true;
-                                    let agendaDoDia = barbeiroEncontrado.agenda || {};
+                                    let agendaDoDia = barbeiroEncontrado.agenda || {}; // REGRA PADRÃO (Agenda Normal)
 
-                                    // 3. Verifica Subcoleção 'agenda_diaria' (Exceções personalizadas)
                                     try {
+                                        // Tenta buscar a exceção do dia (Agenda Diária)
                                         const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiroEncontrado.uid).collection('agenda_diaria').doc(fnArgs.data).get();
                                         if (agendaDiariaDoc.exists) {
                                             const dadosDiarios = agendaDiariaDoc.data();
-                                            agendaDoDia = dadosDiarios.horarios || dadosDiarios; 
-                                            usaAgendaManual = true; // Força a verificação manual, pois o dia foi personalizado
+                                            // Se tiver a diária, ela sobrepõe a normal na hora!
+                                            if (dadosDiarios.horarios && Object.keys(dadosDiarios.horarios).length > 0) {
+                                                agendaDoDia = dadosDiarios.horarios;
+                                                usaAgendaManual = true; 
+                                            } else if (Object.keys(dadosDiarios).length > 0 && !dadosDiarios.horarios) {
+                                                agendaDoDia = dadosDiarios;
+                                                usaAgendaManual = true;
+                                            }
                                         }
                                     } catch (e) {
-                                        console.log("[IA] Sem agenda_diaria especial, usando expediente base.");
+                                        console.log("[IA] Sem agenda_diaria especial, usando agenda normal/expediente base.");
                                     }
 
-                                    // 4. Busca todos os agendamentos reais do banco para AQUELE DIA
+                                    // 4. BUSCA TODOS OS AGENDAMENTOS DO DIA PARA CÁLCULO DE ACAVALAMENTO
                                     const agSnap = await db.collection('agendamentos')
                                         .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                         .where('data', '==', fnArgs.data)
@@ -2015,19 +2022,20 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                                     agSnap.forEach(doc => {
                                         const ag = doc.data();
                                         let inicio = timeToMin(ag.horario);
-                                        let duracao = ag.duracao ? Number(ag.duracao) : 30; // Se não tiver duração, assume bloco de 30
+                                        // Puxa a duração exata do banco. Se por algum motivo não tiver, assume 30min padrão
+                                        let duracao = ag.duracao ? Number(ag.duracao) : 30; 
                                         let fim = inicio + duracao;
-                                        ocupados.push({ inicio, fim });
+                                        ocupados.push({ inicio, fim, servico: ag.servico });
                                     });
 
-                                    // 5. Filtro de Tempo Real (Não sugerir horas do passado)
+                                    // 5. Filtro de Tempo Real (Não sugerir horas do passado hoje)
                                     const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
                                     const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
                                     const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
 
                                     let horariosLivres = [];
                                     
-                                    // 6. O Motor de Varredura (Varre o dia de 30 em 30 min)
+                                    // 6. MOTOR DE VARREDURA E COLISÃO CIRÚRGICA (De 30 em 30 min)
                                     for (let i = inicioExp; i <= fimExp - 30; i += 30) {
                                         // A. O horário já passou?
                                         if (isToday && i <= agoraMin) continue;
@@ -2040,25 +2048,26 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                                         // C. Verificação da Agenda Manual / Diária
                                         if (usaAgendaManual) {
                                             const statusSlot = agendaDoDia[horaFormatada];
-                                            // Se o barbeiro desligou o botãozinho desse horário (false), a IA ignora
+                                            // Se o barbeiro desligou o botãozinho desse horário (false), a IA pula
                                             if (statusSlot === false || String(statusSlot).toLowerCase() === "false" || String(statusSlot).toLowerCase() === "ocupado") {
                                                 continue;
                                             }
                                         }
 
-                                        // D. Matemática de Colisão com Agendamentos Reais
-                                        let slotFim = i + 30; 
+                                        // D. CÁLCULO ANTI-ACAVALAMENTO 
+                                        // Testamos se este slot (ex: das 10:00 às 10:30) bate com algum agendamento existente
+                                        let slotFim = i + 30; // Simulamos que o cliente quer pelo menos um bloco de 30min
                                         let temConflito = false;
                                         
                                         for (const oc of ocupados) {
-                                            // Fórmula infalível de colisão de tempo
+                                            // Fórmula matemática exata para interseção de tempo (Overlap)
                                             if (i < oc.fim && slotFim > oc.inicio) {
                                                 temConflito = true;
                                                 break;
                                             }
                                         }
 
-                                        // Se sobreviveu a todos os filtros, o horário está 100% LIVRE
+                                        // Se sobreviveu a todos os filtros e não encavalou com ninguém, está LIVRE!
                                         if (!temConflito) {
                                             horariosLivres.push(horaFormatada);
                                         }
