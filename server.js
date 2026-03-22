@@ -2384,8 +2384,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             }
 
             // --- ENVIO ---
-const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; // Colei seu ngrok aqui!
-const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolution
+const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+const API_KEY_EVO = "Ja997640401"; 
 
             if (!respostaFinal) respostaFinal = "Erro interno.";
             respostaFinal = respostaFinal.replace(/undefined/g, "");
@@ -2397,13 +2397,17 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                     numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
                 }
 
-                // 2. Novo formato padrão da Evolution API v2
+                // 2. Novo formato com BYPASS de segurança (checkNumber: false)
                 const body = {
                     number: numeroParaEnvio,
-                    text: respostaFinal
+                    text: respostaFinal,
+                    options: {
+                        delay: 1000,
+                        presence: "composing",
+                        checkNumber: false // <--- É ISSO AQUI QUE FAZ O @LID FUNCIONAR!
+                    }
                 };
                 
-                // CORREÇÃO: Usar a variável correta no console.log
                 console.log(`[ZAP] Enviando Payload para ${numeroParaEnvio}:`, JSON.stringify(body));
 
                 try {
