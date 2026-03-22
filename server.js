@@ -1877,6 +1877,41 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                             return new Date(field); 
                         };
 
+const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
+                            let inicioExp = timeToMin(barbeiro.horarioInicio || "08:00");
+                            let fimExp = timeToMin(barbeiro.horarioFim || "20:00");
+                            let almocoIn = timeToMin(barbeiro.almocoInicio || "12:00");
+                            let almocoOut = timeToMin(barbeiro.almocoFim || "13:00");
+                            if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
+
+                            let usaAgendaManual = barbeiro.usaAgendaManual === true;
+                            let agendaDoDia = barbeiro.agenda || {};
+
+                            try {
+                                const agDiariaDoc = await db.collection('usuarios').doc(barbeiro.uid).collection('agenda_diaria').doc(dataStr).get();
+                                if (agDiariaDoc.exists) {
+                                    const dd = agDiariaDoc.data();
+                                    if (dd.horarios && Object.keys(dd.horarios).length > 0) { agendaDoDia = dd.horarios; usaAgendaManual = true; }
+                                    else if (Object.keys(dd).length > 0 && !dd.horarios) { agendaDoDia = dd; usaAgendaManual = true; }
+                                }
+                            } catch (e) {}
+
+                            // Regra 1: Fora do limite geral?
+                            if (novoInicio < inicioExp || novoFim > fimExp) return false;
+                            
+                            // Regra 2: Caiu no horário de almoço padrão?
+                            if (!usaAgendaManual && almocoIn !== -1 && ((novoInicio >= almocoIn && novoInicio < almocoOut) || (novoFim > almocoIn && novoFim <= almocoOut) || (novoInicio <= almocoIn && novoFim >= almocoOut))) return false;
+                            
+                            // Regra 3: Bateu nos blocos de 30min da agenda manual?
+                            if (usaAgendaManual) {
+                                for (let i = novoInicio; i < novoFim; i += 30) {
+                                    const st = agendaDoDia[minToTime(i)];
+                                    if (st === false || String(st).toLowerCase() === "false" || String(st).toLowerCase() === "ocupado") return false;
+                                }
+                            }
+                            return true; // Passou em tudo! Tá livre!
+                        };
+
                         // Assíncrono para ler a subcoleção agenda_diaria
                         const getWorkingIntervals = async (barbeiro, dataStr) => {
                             let agendaDoDia = barbeiro.agenda || {};
