@@ -2403,7 +2403,8 @@ const API_KEY_EVO = "Ja997640401"; // Mantenha essa se for a mesma do seu Evolut
                     text: respostaFinal
                 };
                 
-                console.log(`[ZAP] Enviando Payload para ${numeroLimpo}:`, JSON.stringify(body));
+                // CORREÇÃO: Usar a variável correta no console.log
+                console.log(`[ZAP] Enviando Payload para ${numeroParaEnvio}:`, JSON.stringify(body));
 
                 try {
                     const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}`;
