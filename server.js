@@ -1673,10 +1673,6 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 console.log("[DB] Erro ao buscar identidade:", e.message);
             }
 
-            // Transforma o dicionário num texto fácil pra IA ler
-            const listaBarbeariasTexto = Object.entries(equipePorBarbearia)
-                .map(([barbearia, profissionais]) => `${barbearia} (Profissionais: ${profissionais.join(', ')})`)
-                .join(' | ');
 
             // ============================================================
             // 🧠 MEMÓRIA DO BOT
