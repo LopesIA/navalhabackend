@@ -1553,7 +1553,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     console.log(`[ZAP] 👻 Fantasma detectado! Nome: ${nomeWhatsapp}. Vasculhando o banco de dados...`);
                     
                     try {
-                        let numeroRealEncontrado = null;
+                        let usuariosEncontrados = [];
                         const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                         
                         // Varre os usuários para achar de quem é esse nome
@@ -1562,28 +1562,32 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             const u = doc.data();
                             if (u.telefone && u.nome) {
                                 const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                // Se o nome bater ou for muito parecido, pegamos o número!
                                 if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
-                                    // Adiciona o @s.whatsapp.net para o padrão do sistema
-                                    numeroRealEncontrado = u.telefone.includes('@s.whatsapp.net') ? u.telefone : `${u.telefone}@s.whatsapp.net`;
+                                    usuariosEncontrados.push(u.telefone);
                                 }
                             }
                         });
 
-                        if (numeroRealEncontrado) {
-                            console.log(`[ZAP] 🎯 BINGO! O número real do ${nomeWhatsapp} é ${numeroRealEncontrado}`);
-                            // O MILAGRE ACONTECE AQUI: Trocamos o @lid pelo número de verdade!
-                            numeroRemetente = numeroRealEncontrado; 
+                        // SÓ APLICA A MÁGICA SE ACHAR EXATAMENTE 1 PESSOA!
+                        if (usuariosEncontrados.length === 1) {
+                            let numeroRealEncontrado = usuariosEncontrados[0];
+                            numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+                            
+                            console.log(`[ZAP] 🎯 BINGO! Único cliente encontrado. O número real de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
+                            numeroRemetente = numeroRealEncontrado; // O Milagre acontece!
+                            
+                        } else if (usuariosEncontrados.length > 1) {
+                            // TEM DOIS ARLAN! O bot desiste de adivinhar e atende ele como "Desconhecido" pelo @lid
+                            console.log(`[ZAP] ⚠️ Mais de um cliente encontrado com o nome '${nomeWhatsapp}'. Impossível adivinhar qual é.`);
+                            // Ele vai manter o @lid e o Gemini vai perguntar o nome/número dele na conversa.
+                            
                         } else {
-                            console.log(`[ZAP] ❌ Cliente '${nomeWhatsapp}' não tem cadastro prévio. Impossível adivinhar o DDD. Ignorando.`);
-                            return res.status(200).send("LID_NOT_FOUND");
+                            // NÃO ACHOU NINGUÉM! É um cliente 100% novo que veio pelo link oculto.
+                            console.log(`[ZAP] ❌ Cliente '${nomeWhatsapp}' não tem cadastro prévio. Mantendo @lid.`);
                         }
                     } catch (e) {
                         console.log(`[ZAP] Erro na Máquina de Descoberta:`, e.message);
-                        return res.status(200).send("LID_ERROR");
                     }
-                } else {
-                    return res.status(200).send("LID_IGNORED_NO_NAME");
                 }
             }
             // =========================================================
