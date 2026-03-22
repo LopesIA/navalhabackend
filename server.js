@@ -2407,21 +2407,17 @@ const API_KEY_EVO = "Ja997640401";
                     numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
                 }
 
-                // 2. Novo formato com BYPASS de segurança (checkNumber: false)
+                // Aqui já não precisamos do options: checkNumber no body, vai tudo na URL
                 const body = {
                     number: numeroParaEnvio,
-                    text: respostaFinal,
-                    options: {
-                        delay: 1000,
-                        presence: "composing",
-                        checkNumber: false // <--- É ISSO AQUI QUE FAZ O @LID FUNCIONAR!
-                    }
+                    text: respostaFinal
                 };
                 
                 console.log(`[ZAP] Enviando Payload para ${numeroParaEnvio}:`, JSON.stringify(body));
 
                 try {
-                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}`;
+                    // 🔥 GOLPE FATAL: Passando a ordem de NÃO CHECAR diretamente na URL! 🔥
+                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
                     
                     const r = await fetch(urlEvo, {
                         method: 'POST',
