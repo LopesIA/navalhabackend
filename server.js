@@ -1603,7 +1603,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
 if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 console.log(`[ZAP] 🛑 Atendimento por IA abortado. A Evolution não permite envios para @lid. Aguardando interação com número real.`);
-                return res.status(200).send("LID_BLOCKED_TO_SAVE_RESOURCES");
+                if (!res.headersSent) {
+                    return res.status(200).send("LID_BLOCKED_TO_SAVE_RESOURCES");
+                }
+                return;
             }
 
             // FIX MIKAELA
@@ -1627,14 +1630,14 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             }
 
             // ============================================================
-            // 🔎 SUPER BUSCA: IDENTIDADE, CARGO (RBAC) E BARBEARIAS
+            // 🔎 SUPER BUSCA: IDENTIDADE E CARGO (RBAC) E BARBEARIAS
             // ============================================================
             let nomeConhecido = "";
             let tipoUsuario = "cliente"; 
             let isProprietario = false;
             let meuUid = "";
-            let equipeNomes = []; // Mantido para o menu do proprietário
-            let equipePorBarbearia = {}; // 👈 Novo dicionário para separar as unidades
+            let equipeNomes = [];
+            let equipePorBarbearia = {}; // 👈 NOVO: Dicionário de Barbearias
 
             try {
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
@@ -1656,7 +1659,9 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 equipeSnap.forEach(doc => {
                     const d = doc.data();
                     if (d.nome) {
-                        equipeNomes.push(d.nome);
+                        if (isProprietario) equipeNomes.push(d.nome); // Mantém a lógica do chefe
+                        
+                        // Agrupa por barbearia
                         const barbeariaAtual = d.nomeBarbearia || "Barbearia King"; 
                         if (!equipePorBarbearia[barbeariaAtual]) {
                             equipePorBarbearia[barbeariaAtual] = [];
@@ -1668,10 +1673,140 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 console.log("[DB] Erro ao buscar identidade:", e.message);
             }
 
-            // Transforma o dicionário num texto fácil pra IA ler!
+            // Transforma o dicionário num texto fácil pra IA ler
             const listaBarbeariasTexto = Object.entries(equipePorBarbearia)
                 .map(([barbearia, profissionais]) => `${barbearia} (Profissionais: ${profissionais.join(', ')})`)
                 .join(' | ');
+
+            // ============================================================
+            // 🧠 MEMÓRIA DO BOT
+            // ============================================================
+            const limitHistorico = 40; 
+            const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
+
+            await chatRef.add({
+                role: 'user',
+                parts: [{ text: textoRecebido }],
+                ts: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            const historySnap = await chatRef.orderBy('ts', 'desc').limit(limitHistorico).get();
+            let historicoParaIA = [];
+            
+            historySnap.forEach(doc => {
+                const msg = doc.data();
+                if (msg.role && msg.parts) {
+                    historicoParaIA.unshift({ role: msg.role, parts: msg.parts });
+                }
+            });
+
+            // ============================================================
+            // 🛠️ FERRAMENTAS COMPLETAS
+            // ============================================================
+            const tools = [{
+                "function_declarations": [
+                    {
+                        "name": "listar_meus_agendamentos",
+                        "description": "Lista agendamentos. Se for o CHEFE perguntando, ele pode informar o nome do barbeiro para ver a agenda dele.",
+                        "parameters": { 
+                            "type": "OBJECT", 
+                            "properties": {
+                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional" }
+                            } 
+                        }
+                    },
+                    {
+                        "name": "consultar_disponibilidade",
+                        "description": "Busca a lista de TODOS os horários livres de um barbeiro em uma data. Use OBRIGATORIAMENTE para mostrar opções ao cliente.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                                "barbeiroNome": { "type": "STRING", "description": "Nome do profissional" }
+                            },
+                            "required": ["data", "barbeiroNome"]
+                        }
+                    },
+                    {
+                        "name": "criar_agendamento",
+                        "description": "Cria um novo agendamento para o cliente ou para a equipe.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
+                                "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
+                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                                "horario": { "type": "STRING", "description": "Horário HH:MM" },
+                                "servico": { "type": "STRING", "description": "Nome do serviço" }
+                            },
+                            "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
+                        }
+                    },
+                    {
+                        "name": "atualizar_agendamento",
+                        "description": "Altera um agendamento existente. Exige a DATA e o HORÁRIO antigos.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "dataAntiga": { "type": "STRING", "description": "A data atual do agendamento YYYY-MM-DD" },
+                                "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento HH:MM" },
+                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
+                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
+                                "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
+                                "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional." }
+                            },
+                            "required": ["dataAntiga", "horarioAntigo"] 
+                        }
+                    },
+                    {
+                        "name": "cancelar_agendamento",
+                        "description": "Cancela um agendamento específico.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "data": { "type": "STRING", "description": "Data do agendamento YYYY-MM-DD" },
+                                "horariocancelar": { "type": "STRING", "description": "Horário a cancelar HH:MM" }
+                            },
+                            "required": ["data", "horariocancelar"]
+                        }
+                    },
+                    {
+                        "name": "excluir_agendamento_definitivo",
+                        "description": "Apaga PERMANENTEMENTE um agendamento do banco de dados.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
+                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
+                            },
+                            "required": ["data", "horario"]
+                        }
+                    },
+                    {
+                        "name": "atualizar_meu_perfil",
+                        "description": "Atualiza ou cria o nome do usuário no banco de dados.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "novoNome": { "type": "STRING", "description": "Novo nome do usuário" }
+                            },
+                            "required": ["novoNome"]
+                        }
+                    },
+                    {
+                        "name": "consultar_gestao_financeira",
+                        "description": "Consulta o relatório financeiro e de desempenho (Entradas, Saídas, Saldo). Apenas o Chefe/Proprietário pode usar.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "periodo": { "type": "STRING", "description": "O período desejado: 'dia', 'semana' ou 'mes'." },
+                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional para filtrar. Se vazio, traz o total da barbearia." }
+                            },
+                            "required": ["periodo"]
+                        }
+                    }
+                ]
+            }];
 
             // ============================================================
             // 🤖 PERSONA MUTA-FORMA
@@ -1686,13 +1821,12 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             } else {
                 regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo:
                   1. Pergunte em qual UNIDADE/BARBEARIA o cliente gostaria de ser atendido.
-                  2. Após ele escolher, liste APENAS os profissionais daquela unidade e pergunte com quem ele quer agendar.
-                  3. Pergunte o Serviço desejado.
-                  4. Pergunte a Data. (Se o cliente perguntar "quais dias tem livres?", exija que ele sugira um dia específico, ex: "amanhã" ou "quinta-feira").
-                  5. COM A DATA E PROFISSIONAL EM MÃOS, use 'consultar_disponibilidade'. MOSTRE a lista de horários.
-                  6. Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
-                  7. Resuma os dados e peça a confirmação ("SIM").
-                  8. Agende apenas após o SIM.`;
+                  2. Após ele escolher, liste APENAS os profissionais daquela unidade e pergunte com quem ele quer agendar e qual o serviço.
+                  3. Pergunte a Data. (Se o cliente perguntar "quais dias tem livres?", explique que precisa sugerir um dia exato, ex: amanhã).
+                  4. COM A DATA E PROFISSIONAL EM MÃOS, use 'consultar_disponibilidade'. MOSTRE a lista de horários.
+                  5. Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
+                  6. Resuma os dados e peça a confirmação ("SIM").
+                  7. Agende apenas após o SIM.`;
             }
 
             const API_KEY = process.env.GEMINI_API_KEY;
@@ -2023,7 +2157,7 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 nome: d.nome, 
                                                 percentual: d.percentualComissao || 50, 
                                                 agenda: d.agenda,
-                                                nomeBarbearia: d.nomeBarbearia || "Barbearia King" // 👈 PUXANDO A BARBEARIA DO CADASTRO
+                                                nomeBarbearia: d.nomeBarbearia || "Barbearia King" // 👈 PUXANDO A BARBEARIA
                                             };
                                         }
                                     }
