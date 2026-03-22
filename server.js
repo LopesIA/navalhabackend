@@ -1502,6 +1502,13 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     try {
         const data = req.body;
         
+        // 🔥 O SEU GOLPE DE MESTRE: Ignorar o fantasma na porta! 🔥
+        const remetenteBruto = data.data?.key?.remoteJid || "";
+        if (remetenteBruto.includes('@lid')) {
+            console.log(`[ZAP] 👻 Fantasma @lid ignorado! Deixando o número real passar...`);
+            return res.status(200).send('LID_IGNORED');
+        }
+
         // --- 🛡️ BLINDAGEM ABSOLUTA CONTRA DUPLICATAS ---
         // Pega o ID em todas as posições possíveis da Evolution
         const msgId = data.data?.key?.id || data.data?.id || data.data?.messageId;
