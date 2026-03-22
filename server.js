@@ -1960,20 +1960,21 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                             } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // === 2. CONSULTAR DISPONIBILIDADE ===
+                        // === 2. CONSULTAR DISPONIBILIDADE (MOTOR MATEMÁTICO AVANÇADO) ===
                         else if (fnName === "consultar_disponibilidade") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+                                // 1. Encontra o UID do Barbeiro
                                 allUsers.forEach(doc => {
                                     const d = doc.data();
                                     const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
                                     if (ehValido) { 
                                         const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { uid: doc.id, nome: d.nome, agenda: d.agenda || {} };
+                                            barbeiroEncontrado = { uid: doc.id, ...d };
                                         }
                                     }
                                 });
@@ -1981,61 +1982,92 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                                 if (!barbeiroEncontrado) {
                                     functionResult = { erro: "Profissional não encontrado." };
                                 } else {
-                                    const { intervals, baseSlots } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
+                                    // 2. Extrai Regras do Expediente do Barbeiro
+                                    let inicioExp = timeToMin(barbeiroEncontrado.horarioInicio || "08:00");
+                                    let fimExp = timeToMin(barbeiroEncontrado.horarioFim || "20:00");
+                                    let almocoIn = timeToMin(barbeiroEncontrado.almocoInicio || "12:00");
+                                    let almocoOut = timeToMin(barbeiroEncontrado.almocoFim || "13:00");
+                                    if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
                                     
-                                    if (intervals.length === 0) {
-                                        functionResult = { status: "FECHADO", msg: "Sem expediente neste dia." };
-                                    } else {
-                                        const agSnap = await db.collection('agendamentos')
-                                            .where('barbeiroUid', '==', barbeiroEncontrado.uid)
-                                            .where('data', '==', fnArgs.data)
-                                            .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                            .limit(100)
-                                            .get();
-                                        
-                                        const ocupados = [];
-                                        let potentialStarts = new Set([...baseSlots]);
+                                    let usaAgendaManual = barbeiroEncontrado.usaAgendaManual === true;
+                                    let agendaDoDia = barbeiroEncontrado.agenda || {};
 
-                                        agSnap.forEach(doc => {
-                                            const ag = doc.data();
-                                            let inicio = timeToMin(ag.horario);
-                                            let duracao = ag.duracao ? Number(ag.duracao) : 40; 
-                                            let fim = inicio + duracao;
-                                            ocupados.push({ inicio, fim });
-                                            potentialStarts.add(fim); 
-                                        });
+                                    // 3. Verifica Subcoleção 'agenda_diaria' (Exceções personalizadas)
+                                    try {
+                                        const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiroEncontrado.uid).collection('agenda_diaria').doc(fnArgs.data).get();
+                                        if (agendaDiariaDoc.exists) {
+                                            const dadosDiarios = agendaDiariaDoc.data();
+                                            agendaDoDia = dadosDiarios.horarios || dadosDiarios; 
+                                            usaAgendaManual = true; // Força a verificação manual, pois o dia foi personalizado
+                                        }
+                                    } catch (e) {
+                                        console.log("[IA] Sem agenda_diaria especial, usando expediente base.");
+                                    }
 
-                                        let sortedStarts = Array.from(potentialStarts).sort((a, b) => a - b);
-                                        
-                                        const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-                                        const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
-                                        const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
+                                    // 4. Busca todos os agendamentos reais do banco para AQUELE DIA
+                                    const agSnap = await db.collection('agendamentos')
+                                        .where('barbeiroUid', '==', barbeiroEncontrado.uid)
+                                        .where('data', '==', fnArgs.data)
+                                        .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                        .get(); 
+                                    
+                                    const ocupados = [];
+                                    agSnap.forEach(doc => {
+                                        const ag = doc.data();
+                                        let inicio = timeToMin(ag.horario);
+                                        let duracao = ag.duracao ? Number(ag.duracao) : 30; // Se não tiver duração, assume bloco de 30
+                                        let fim = inicio + duracao;
+                                        ocupados.push({ inicio, fim });
+                                    });
 
-                                        let horariosLivres = [];
-                                        
-                                        for (let slotInicio of sortedStarts) {
-                                            if (isToday && slotInicio <= agoraMin) continue;
+                                    // 5. Filtro de Tempo Real (Não sugerir horas do passado)
+                                    const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+                                    const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
+                                    const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
 
-                                            let slotFim = slotInicio + 40; 
-                                            
-                                            if (!isWithinWorkingHours(slotInicio, slotFim, intervals)) continue;
+                                    let horariosLivres = [];
+                                    
+                                    // 6. O Motor de Varredura (Varre o dia de 30 em 30 min)
+                                    for (let i = inicioExp; i <= fimExp - 30; i += 30) {
+                                        // A. O horário já passou?
+                                        if (isToday && i <= agoraMin) continue;
 
-                                            let temConflito = false;
-                                            for (const oc of ocupados) {
-                                                if (slotInicio < oc.fim && slotFim > oc.inicio) {
-                                                    temConflito = true;
-                                                    break;
-                                                }
+                                        // B. Horário de almoço padrão (Só aplica se NÃO estiver usando agenda manual)
+                                        if (!usaAgendaManual && almocoIn !== -1 && i >= almocoIn && i < almocoOut) continue;
+
+                                        const horaFormatada = minToTime(i);
+
+                                        // C. Verificação da Agenda Manual / Diária
+                                        if (usaAgendaManual) {
+                                            const statusSlot = agendaDoDia[horaFormatada];
+                                            // Se o barbeiro desligou o botãozinho desse horário (false), a IA ignora
+                                            if (statusSlot === false || String(statusSlot).toLowerCase() === "false" || String(statusSlot).toLowerCase() === "ocupado") {
+                                                continue;
                                             }
-
-                                            if (!temConflito) horariosLivres.push(minToTime(slotInicio));
                                         }
 
-                                        if (horariosLivres.length > 0) {
-                                            functionResult = { status: "LIVRE", horarios: horariosLivres };
-                                        } else {
-                                            functionResult = { status: "LOTADO" };
+                                        // D. Matemática de Colisão com Agendamentos Reais
+                                        let slotFim = i + 30; 
+                                        let temConflito = false;
+                                        
+                                        for (const oc of ocupados) {
+                                            // Fórmula infalível de colisão de tempo
+                                            if (i < oc.fim && slotFim > oc.inicio) {
+                                                temConflito = true;
+                                                break;
+                                            }
                                         }
+
+                                        // Se sobreviveu a todos os filtros, o horário está 100% LIVRE
+                                        if (!temConflito) {
+                                            horariosLivres.push(horaFormatada);
+                                        }
+                                    }
+
+                                    if (horariosLivres.length > 0) {
+                                        functionResult = { status: "LIVRE", horarios: horariosLivres };
+                                    } else {
+                                        functionResult = { status: "LOTADO", msg: "A agenda deste profissional está 100% lotada ou bloqueada neste dia." };
                                     }
                                 }
                             } catch (e) { functionResult = { erro: e.message }; }
