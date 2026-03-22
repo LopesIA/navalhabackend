@@ -176,8 +176,10 @@ const corsOptions = {
   optionsSuccessStatus: 200
 };
 
-app.use(cors(corsOptions));
-app.use(express.json());
+// --- CONFIGURAÇÕES DO SERVIDOR ---
+app.use(cors(corsOptions)); // Mantém a segurança do seu painel web intacta!
+app.use(express.json({ limit: '50mb' })); // Aumenta o limite para receber fotos/áudios da Evolution
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 
 // --- FUNÇÃO CENTRAL DE NOTIFICAÇÃO (MELHORADA) ---
@@ -1571,6 +1573,13 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                         // SÓ APLICA A MÁGICA SE ACHAR EXATAMENTE 1 PESSOA!
                         if (usuariosEncontrados.length === 1) {
                             let numeroRealEncontrado = usuariosEncontrados[0];
+                            
+                            // 🔧 CORREÇÃO DO DDD: Limpa traços/espaços e adiciona o 55 do Brasil se faltar!
+                            numeroRealEncontrado = numeroRealEncontrado.replace(/[^0-9]/g, ''); 
+                            if (!numeroRealEncontrado.startsWith('55')) {
+                                numeroRealEncontrado = '55' + numeroRealEncontrado;
+                            }
+
                             numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
                             
                             console.log(`[ZAP] 🎯 BINGO! Único cliente encontrado. O número real de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
