@@ -1536,8 +1536,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-// 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS PARA NÃO TRAVAR A IA
-            if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) return;
+// 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS (Mas agora deixa o @lid passar!)
+            if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) {
+                return res.status(200).send("Ignorado");
+            }
 
             // FIX MIKAELA
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
@@ -2603,6 +2605,37 @@ app.get('/cron/verificar-inauguracao', async (req, res) => {
     } catch (error) {
         console.error("❌ [CRON ERRO]", error);
         res.status(500).send("Erro interno no Cron Job: " + error.message);
+    }
+});
+
+// ============================================================
+// 🚀 ROTA MÁGICA: DESLIGAR A TRAVA DO EVOLUTION (@LID)
+// ============================================================
+app.get('/desligar-trava', async (req, res) => {
+    const urlEvo = `https://evolution-king-agenda.onrender.com/settings/set/KingAgenda`;
+    const API_KEY_EVO = "Ja997640401";
+    
+    try {
+        // Envia uma ordem direta para as configurações ocultas da Evolution
+        const r = await fetch(urlEvo, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json', 
+                'apikey': API_KEY_EVO 
+            },
+            body: JSON.stringify({ 
+                check_number: false,   // Para versões v1
+                checkNumber: false     // Para versões v2
+            })
+        });
+        
+        const resultado = await r.json();
+        res.json({ 
+            mensagem: "✅ TRAVA DESLIGADA COM SUCESSO! A Evolution agora aceita @lid e números ocultos.", 
+            detalhes: resultado 
+        });
+    } catch (e) {
+        res.send("Erro ao desligar a trava: " + e.message);
     }
 });
 
