@@ -1531,6 +1531,14 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         const nomeDaInstancia = data.instance || "KingAgenda"; 
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
+            
+            // 🔥 RAIO-X PARA ACHAR O NÚMERO REAL ESCONDIDO 🔥
+            if (data.data?.key?.remoteJid?.includes('@lid')) {
+                console.log("==== RAIO-X DA MENSAGEM FANTASMA ====");
+                console.log(JSON.stringify(data.data, null, 2));
+                console.log("=====================================");
+            }
+
             const mensagem = data.data.message;
             const key = data.data.key || {};
             let numeroRemetente = key.remoteJid;
