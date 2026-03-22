@@ -2164,9 +2164,9 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     }
 
                                     const novoFim = novoInicio + duracaoServicoFinal; 
-                                    const { intervals } = await getWorkingIntervals(barbeiroEncontrado, fnArgs.data);
+                                    const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
 
-                                    if (!isWithinWorkingHours(novoInicio, novoFim, intervals)) {
+                                    if (!isValido) {
                                         functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
                                     } else {
                                         const conflitoSnap = await db.collection('agendamentos')
@@ -2267,10 +2267,9 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                         let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 40;
                                         const novoInicio = timeToMin(novoHorarioFinal);
                                         const novoFim = novoInicio + duracaoServ; 
-                                        
-                                        const { intervals } = await getWorkingIntervals(barbeiroObjCompleto, novaDataFinal);
+                                        const isValido = await validarExpediente(barbeiroObjCompleto, novaDataFinal, novoInicio, novoFim);
 
-                                        if (!isWithinWorkingHours(novoInicio, novoFim, intervals)) {
+                                        if (!isValido) {
                                             functionResult = { erro: "O novo horário está fora do expediente da agenda_diaria." };
                                         } else {
                                             const conflitoSnap = await db.collection('agendamentos')
