@@ -1808,6 +1808,14 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 ]
             }];
 
+            // Transforma o dicionário num texto fácil pra IA ler
+            const listaBarbeariasTexto = Object.entries(equipePorBarbearia)
+                .map(([barbearia, profissionais]) => `Na ${barbearia} trabalham: ${profissionais.join(', ')}`)
+                .join(' | ');
+
+            // 👈 MÁGICA NOVA: Criamos uma lista só com os Nomes das Barbearias
+            const nomesDasBarbearias = Object.keys(equipePorBarbearia).join(' ou '); 
+
             // ============================================================
             // 🤖 PERSONA MUTA-FORMA
             // ============================================================
@@ -1819,14 +1827,15 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             } else if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
                 regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
-                regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo:
-                  1. Pergunte em qual UNIDADE/BARBEARIA o cliente gostaria de ser atendido.
-                  2. Após ele escolher, liste APENAS os profissionais daquela unidade e pergunte com quem ele quer agendar e qual o serviço.
-                  3. Pergunte a Data. (Se o cliente perguntar "quais dias tem livres?", explique que precisa sugerir um dia exato, ex: amanhã).
-                  4. COM A DATA E PROFISSIONAL EM MÃOS, use 'consultar_disponibilidade'. MOSTRE a lista de horários.
-                  5. Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
-                  6. Resuma os dados e peça a confirmação ("SIM").
-                  7. Agende apenas após o SIM.`;
+                regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo rigoroso, UM PASSO POR VEZ:
+                  PASSO 1: Se o cliente pedir para agendar, a sua PRIMEIRA E ÚNICA pergunta deve ser: "Em qual barbearia você gostaria de agendar? Temos: ${nomesDasBarbearias}". PARE DE FALAR AQUI E AGUARDE A RESPOSTA! NUNCA liste nomes de profissionais no Passo 1.
+                  PASSO 2: Assim que o cliente disser o nome da barbearia, olhe sua lista secreta [${listaBarbeariasTexto}]. Liste para o cliente APENAS os profissionais que trabalham nessa unidade e pergunte com quem ele quer cortar.
+                  PASSO 3: Pergunte qual serviço ele quer fazer.
+                  PASSO 4: Pergunte a Data (Exija um dia específico, ex: "amanhã", "sexta-feira").
+                  PASSO 5: Com a data e o barbeiro em mãos, use a ferramenta 'consultar_disponibilidade'. MOSTRE a lista de horários.
+                  PASSO 6: Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
+                  PASSO 7: Resuma os dados e peça a confirmação ("SIM").
+                  PASSO 8: Agende apenas após o SIM.`;
             }
 
             const API_KEY = process.env.GEMINI_API_KEY;
@@ -1836,15 +1845,15 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
-                Aqui estão as barbearias e os profissionais disponíveis na rede King Agenda no momento:
-                [BARBEARIAS E EQUIPE]: ${listaBarbeariasTexto || "Nenhum profissional cadastrado"}
+                Aqui está a sua lista secreta de profissionais: [${listaBarbeariasTexto}]
                 
                 ${regrasCargos}
 
                 REGRAS DE OURO:
-                1. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade'. O sistema vai cruzar a subcoleção agenda_diaria com os últimos 100 agendamentos para criar os blocos matemáticos de tempo livre.
-                2. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!
-                3. VERDADE: Se a função retornar 'erro' (ex: horário lotado ou fora do expediente), avise o cliente e não force o agendamento.` }]
+                1. NÃO SEJA AFOBADA: Não tente pular os passos do fluxo de atendimento do cliente. Faça UMA pergunta por vez.
+                2. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade' antes de dar opções de horário.
+                3. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!
+                4. VERDADE: Se a função retornar 'erro' (ex: horário lotado ou fora do expediente), avise o cliente e não force o agendamento.` }]
             };
 
             let respostaFinal = "";
