@@ -1601,6 +1601,11 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             }
             // =========================================================
 
+if (numeroRemetente && numeroRemetente.includes('@lid')) {
+                console.log(`[ZAP] 🛑 Atendimento por IA abortado. A Evolution não permite envios para @lid. Aguardando interação com número real.`);
+                return res.status(200).send("LID_BLOCKED_TO_SAVE_RESOURCES");
+            }
+
             // FIX MIKAELA
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
                 numeroRemetente = "5527996598623@s.whatsapp.net"; 
