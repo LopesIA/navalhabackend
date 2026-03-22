@@ -1533,23 +1533,60 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         const nomeDaInstancia = data.instance || "KingAgenda"; 
 
         if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
-            
-            // 🔥 RAIO-X PARA ACHAR O NÚMERO REAL ESCONDIDO 🔥
-            if (data.data?.key?.remoteJid?.includes('@lid')) {
-                console.log("==== RAIO-X DA MENSAGEM FANTASMA ====");
-                console.log(JSON.stringify(data.data, null, 2));
-                console.log("=====================================");
-            }
-
             const mensagem = data.data.message;
             const key = data.data.key || {};
             let numeroRemetente = key.remoteJid;
             const fromMe = key.fromMe;
 
-// 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS (Mas agora deixa o @lid passar!)
+            // 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS
             if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) {
                 return res.status(200).send("Ignorado");
             }
+
+            // =========================================================
+            // 🕵️‍♂️ MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
+            // =========================================================
+            if (numeroRemetente && numeroRemetente.includes('@lid')) {
+                const nomeWhatsapp = data.data?.pushName;
+                
+                if (nomeWhatsapp) {
+                    console.log(`[ZAP] 👻 Fantasma detectado! Nome: ${nomeWhatsapp}. Vasculhando o banco de dados...`);
+                    
+                    try {
+                        let numeroRealEncontrado = null;
+                        const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        
+                        // Varre os usuários para achar de quem é esse nome
+                        const allUsers = await db.collection('usuarios').get();
+                        allUsers.forEach(doc => {
+                            const u = doc.data();
+                            if (u.telefone && u.nome) {
+                                const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                // Se o nome bater ou for muito parecido, pegamos o número!
+                                if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
+                                    // Adiciona o @s.whatsapp.net para o padrão do sistema
+                                    numeroRealEncontrado = u.telefone.includes('@s.whatsapp.net') ? u.telefone : `${u.telefone}@s.whatsapp.net`;
+                                }
+                            }
+                        });
+
+                        if (numeroRealEncontrado) {
+                            console.log(`[ZAP] 🎯 BINGO! O número real do ${nomeWhatsapp} é ${numeroRealEncontrado}`);
+                            // O MILAGRE ACONTECE AQUI: Trocamos o @lid pelo número de verdade!
+                            numeroRemetente = numeroRealEncontrado; 
+                        } else {
+                            console.log(`[ZAP] ❌ Cliente '${nomeWhatsapp}' não tem cadastro prévio. Impossível adivinhar o DDD. Ignorando.`);
+                            return res.status(200).send("LID_NOT_FOUND");
+                        }
+                    } catch (e) {
+                        console.log(`[ZAP] Erro na Máquina de Descoberta:`, e.message);
+                        return res.status(200).send("LID_ERROR");
+                    }
+                } else {
+                    return res.status(200).send("LID_IGNORED_NO_NAME");
+                }
+            }
+            // =========================================================
 
             // FIX MIKAELA
             if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
