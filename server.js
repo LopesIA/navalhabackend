@@ -1671,11 +1671,14 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                     }
                 });
 
-                // 💰 NOVO: BUSCA A TABELA DE SERVIÇOS DO PROPRIETÁRIO NO BANCO
+                // 💰 BUSCA OS SERVIÇOS (Lendo a sua estrutura exata!)
                 const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
                 if (!ownerSnap.empty) {
                     const ownerData = ownerSnap.docs[0].data();
                     tabelaServicos = ownerData.listaServicos || [];
+                    console.log(`[DB] Encontrados ${tabelaServicos.length} serviços no banco.`);
+                } else {
+                    console.log("[AVISO] Proprietário não encontrado! O cardápio ficará vazio.");
                 }
 
             } catch (e) {
@@ -1818,12 +1821,15 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 .map(([barbearia, profissionais]) => `Na ${barbearia} trabalham: ${profissionais.join(', ')}`)
                 .join(' | ');
 
-            // 👈 NOVO: Transforma a tabela de serviços num "Cardápio" pra IA ler
-            const listaServicosTexto = tabelaServicos.map(s => {
-                const nomeS = s.nome || s;
-                const valorS = s.valor ? `R$ ${s.valor}` : "R$ 40";
-                return `${nomeS} (${valorS})`;
-            }).join(' | ');
+            // 👈 LÊ A SUA ESTRUTURA EXATA DO BANCO DE DADOS
+            let listaServicosTexto = "Nenhum serviço cadastrado.";
+            if (tabelaServicos.length > 0) {
+                listaServicosTexto = tabelaServicos.map(s => {
+                    const nomeS = s.nome || "Serviço";
+                    const valorS = s.valor || 0;
+                    return `• ${nomeS} (R$ ${valorS})`;
+                }).join('\n'); // Quebrando em linhas para a IA ler melhor
+            }
 
             // ============================================================
             // 🤖 PERSONA MUTA-FORMA
@@ -1837,20 +1843,20 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
                 regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo rigoroso, UM PASSO POR VEZ:
-                  PASSO 1: Se o cliente pedir para agendar, a sua PRIMEIRA E ÚNICA pergunta deve ser amigável e curta: "Em qual barbearia você gostaria de agendar?". PARE DE FALAR AQUI E AGUARDE A RESPOSTA! NUNCA liste as opções de barbearias ou nomes de profissionais no Passo 1.
-                  PASSO 2: O cliente vai digitar o nome do local. Use a sua inteligência para cruzar o que ele digitou com a sua lista secreta de unidades [${listaBarbeariasTexto}]. Releve erros de digitação, falta de acentos ou nomes incompletos. Se você entender qual é, confirme o local e liste APENAS os profissionais que trabalham lá. (OBS: Se o cliente disser que não sabe quais são as unidades, aí sim você lista para ele escolher).
-                  PASSO 3: Pergunte qual serviço ele quer fazer.
+                  PASSO 1: Se o cliente pedir para agendar, a sua PRIMEIRA E ÚNICA pergunta deve ser amigável e curta: "Em qual barbearia você gostaria de agendar?". PARE DE FALAR AQUI E AGUARDE A RESPOSTA!
+                  PASSO 2: O cliente vai digitar o nome do local. Use a sua inteligência para cruzar o que ele digitou com a sua lista secreta de unidades [${listaBarbeariasTexto}]. Se você entender qual é, confirme o local e liste APENAS os profissionais que trabalham lá.
+                  PASSO 3: Mostre para o cliente a TABELA DE SERVIÇOS E VALORES e pergunte qual ele quer fazer. É ESTRITAMENTE PROIBIDO inventar, oferecer ou aceitar serviços que não estejam nessa lista!
                   PASSO 4: Pergunte a Data (Exija um dia específico, ex: "amanhã", "sexta-feira").
                   PASSO 5: Com a data e o barbeiro em mãos, use a ferramenta 'consultar_disponibilidade'. MOSTRE a lista de horários.
                   PASSO 6: Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
-                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO conforme a Tabela de Serviços) e peça a confirmação ("SIM"). // 👈 ATUALIZADO AQUI
+                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO conforme a Tabela de Serviços) e peça a confirmação ("SIM").
                   PASSO 8: Agende apenas após o SIM.`;
             }
 
             const API_KEY = process.env.GEMINI_API_KEY;
             const MODEL_NAME = "gemini-2.5-flash"; 
 
-            // 👇 MÁGICA NOVA: Forçando o relógio da IA para o fuso do Brasil
+            // Forçando o relógio da IA para o fuso do Brasil
             const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
             const dataFormatada = dataHojeBrasil.toLocaleDateString('pt-BR');
 
@@ -1859,15 +1865,18 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
                 Aqui está a sua lista secreta de profissionais: [${listaBarbeariasTexto}]
-                Aqui está a TABELA DE SERVIÇOS E VALORES: [${listaServicosTexto || "Serviço Padrão (R$ 40)"}] // 👈 NOVO INSERIDO NA MEMÓRIA DA IA
+                
+                TABELA DE SERVIÇOS OFICIAIS E VALORES:
+                ${listaServicosTexto}
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO:
-                1. NÃO SEJA AFOBADA: Não tente pular os passos do fluxo de atendimento do cliente. Faça UMA pergunta por vez, seja o mais natural e humano possível.
-                2. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade' antes de dar opções de horário.
-                3. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!
-                4. VERDADE: Se a função retornar 'erro' (ex: horário lotado ou fora do expediente), avise o cliente e não force o agendamento.` }]
+                REGRAS DE OURO ABSOLUTAS:
+                1. É ESTRITAMENTE PROIBIDO INVENTAR SERVIÇOS: Você só pode oferecer ao cliente os serviços que estão na TABELA OFICIAL acima. Se ele pedir "luzes" e não estiver na tabela, diga educadamente que não oferecemos esse serviço.
+                2. NA HORA DE RESUMIR E AGENDAR, mostre o valor EXATO correspondente ao serviço escolhido na Tabela Oficial.
+                3. NÃO SEJA AFOBADA: Faça UMA pergunta por vez, seja o mais natural e humano possível.
+                4. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade' antes de dar opções de horário.
+                5. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!` }]
             };
 
             let respostaFinal = "";
