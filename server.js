@@ -1630,7 +1630,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             }
 
             // ============================================================
-            // 🔎 SUPER BUSCA: IDENTIDADE E CARGO (RBAC), BARBEARIAS E SERVIÇOS
+            // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA (donoUid)
             // ============================================================
             let nomeConhecido = "";
             let tipoUsuario = "cliente"; 
@@ -1638,7 +1638,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             let meuUid = "";
             let equipeNomes = [];
             let equipePorBarbearia = {}; 
-            let tabelaServicos = []; // 👈 NOVO: Guarda a lista de serviços
+            let tabelaServicosPorBarbearia = {}; // 👈 NOVO: Serviços separados por barbearia
 
             try {
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
@@ -1655,45 +1655,40 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                     }
                 }
 
-                // 🏢 BUSCA A EQUIPE E AGRUPA PELO 'nomeBarbearia'
+                // 🏢 BUSCA A EQUIPE E PUXA OS SERVIÇOS EXATOS DO DONO DE CADA UNIDADE
                 const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
-                equipeSnap.forEach(doc => {
+                let cacheDonos = {};
+
+                // Usando for...of para permitir buscas assíncronas (await) dentro do loop
+                for (const doc of equipeSnap.docs) {
                     const d = doc.data();
                     if (d.nome) {
-                        if (isProprietario) equipeNomes.push(d.nome); // Mantém a lógica do chefe
+                        if (isProprietario) equipeNomes.push(d.nome); 
                         
-                        // Agrupa por barbearia
                         const barbeariaAtual = d.nomeBarbearia || "Barbearia King"; 
                         if (!equipePorBarbearia[barbeariaAtual]) {
                             equipePorBarbearia[barbeariaAtual] = [];
                         }
                         equipePorBarbearia[barbeariaAtual].push(d.nome);
-                    }
-                });
 
-                // 💰 BUSCA OS SERVIÇOS (Filtro Anti-Conta Teste)
-                // Tiramos o .limit(1) para ele olhar todos os admins
-                const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).get();
-                
-                if (!ownerSnap.empty) {
-                    ownerSnap.forEach(doc => {
-                        const ownerData = doc.data();
-                        const listaDesteDono = ownerData.listaServicos || [];
+                        // 🎯 A MÁGICA: Busca os serviços do donoUid específico deste barbeiro!
+                        let uidDoDono = d.donoUid || doc.id; // Se não tiver donoUid, ele mesmo é o dono
                         
-                        // Se a lista desse dono for maior que a anterior, ele substitui!
-                        // Isso garante que ele ignore o "Admin de teste" (que tem 2 itens) 
-                        // e fisgue o seu Admin Real (que tem 20 itens).
-                        if (listaDesteDono.length > tabelaServicos.length) {
-                            tabelaServicos = listaDesteDono;
+                        if (!tabelaServicosPorBarbearia[barbeariaAtual]) {
+                            if (!cacheDonos[uidDoDono]) {
+                                const donoDoc = await db.collection('usuarios').doc(uidDoDono).get();
+                                if (donoDoc.exists) {
+                                    cacheDonos[uidDoDono] = donoDoc.data().listaServicos || [];
+                                } else {
+                                    cacheDonos[uidDoDono] = [];
+                                }
+                            }
+                            tabelaServicosPorBarbearia[barbeariaAtual] = cacheDonos[uidDoDono];
                         }
-                    });
-                    console.log(`[DB] Encontrados ${tabelaServicos.length} serviços reais no banco.`);
-                } else {
-                    console.log("[AVISO] Proprietário não encontrado! O cardápio ficará vazio.");
+                    }
                 }
-
             } catch (e) {
-                console.log("[DB] Erro ao buscar identidade:", e.message);
+                console.log("[DB] Erro ao buscar identidade/serviços:", e.message);
             }
 
 
@@ -1842,6 +1837,18 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 }).join('\n'); // Quebrando em linhas para a IA ler melhor
             }
 
+            // 👈 MAPA COMPLETO PARA A IA (Barbearia -> Equipe -> Serviços Específicos)
+            const listaCompletaIA = Object.keys(equipePorBarbearia).map(barbearia => {
+                const profissionais = equipePorBarbearia[barbearia].join(', ');
+                const servicos = (tabelaServicosPorBarbearia[barbearia] || []).map(s => {
+                    const n = s.nome || "Serviço";
+                    const v = s.valor || s.preco || 0;
+                    return `• ${n} (R$ ${v})`;
+                }).join('\n');
+                
+                return `💈 UNIDADE: ${barbearia}\n- Equipe: ${profissionais}\n- TABELA DE SERVIÇOS:\n${servicos || "Nenhum serviço cadastrado"}`;
+            }).join('\n\n====================\n\n');
+
             // ============================================================
             // 🤖 PERSONA MUTA-FORMA
             // ============================================================
@@ -1854,20 +1861,19 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
             } else {
                 regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo rigoroso, UM PASSO POR VEZ:
-                  PASSO 1: Se o cliente pedir para agendar, a sua PRIMEIRA E ÚNICA pergunta deve ser amigável e curta: "Em qual barbearia você gostaria de agendar?". PARE DE FALAR AQUI E AGUARDE A RESPOSTA!
-                  PASSO 2: O cliente vai digitar o nome do local. Use a sua inteligência para cruzar o que ele digitou com a sua lista secreta de unidades [${listaBarbeariasTexto}]. Se você entender qual é, confirme o local e liste APENAS os profissionais que trabalham lá.
-                  PASSO 3: Mostre para o cliente a TABELA DE SERVIÇOS E VALORES e pergunte qual ele quer fazer. É ESTRITAMENTE PROIBIDO inventar, oferecer ou aceitar serviços que não estejam nessa lista!
-                  PASSO 4: Pergunte a Data (Exija um dia específico, ex: "amanhã", "sexta-feira").
-                  PASSO 5: Com a data e o barbeiro em mãos, use a ferramenta 'consultar_disponibilidade'. MOSTRE a lista de horários.
-                  PASSO 6: Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
-                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO conforme a Tabela de Serviços) e peça a confirmação ("SIM").
+                  PASSO 1: Pergunte: "Em qual barbearia você gostaria de agendar?". PARE DE FALAR AQUI!
+                  PASSO 2: Assim que o cliente disser a unidade, olhe o MAPA COMPLETO abaixo. Liste APENAS os profissionais que trabalham naquela unidade e pergunte com quem ele quer cortar.
+                  PASSO 3: Leia a TABELA DE SERVIÇOS exclusiva daquela unidade no MAPA COMPLETO e pergunte qual serviço ele deseja. É ESTRITAMENTE PROIBIDO misturar serviços de outras unidades ou inventar serviços.
+                  PASSO 4: Pergunte a Data (ex: "amanhã", "sexta-feira").
+                  PASSO 5: Use a ferramenta 'consultar_disponibilidade' e mostre os horários.
+                  PASSO 6: Pergunte o nome dele caso você ainda não saiba.
+                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO da tabela daquela unidade) e peça a confirmação ("SIM").
                   PASSO 8: Agende apenas após o SIM.`;
             }
 
             const API_KEY = process.env.GEMINI_API_KEY;
             const MODEL_NAME = "gemini-2.5-flash"; 
 
-            // Forçando o relógio da IA para o fuso do Brasil
             const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
             const dataFormatada = dataHojeBrasil.toLocaleDateString('pt-BR');
 
@@ -1875,19 +1881,15 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é dia ${dataFormatada}.
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
-                Aqui está a sua lista secreta de profissionais: [${listaBarbeariasTexto}]
-                
-                TABELA DE SERVIÇOS OFICIAIS E VALORES:
-                ${listaServicosTexto}
+                Aqui está o MAPA COMPLETO de Barbearias, Profissionais e suas TABELAS DE SERVIÇOS EXCLUSIVAS:
+                ${listaCompletaIA}
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO ABSOLUTAS:
-                1. É ESTRITAMENTE PROIBIDO INVENTAR SERVIÇOS: Você só pode oferecer ao cliente os serviços que estão na TABELA OFICIAL acima. Se ele pedir "luzes" e não estiver na tabela, diga educadamente que não oferecemos esse serviço.
-                2. NA HORA DE RESUMIR E AGENDAR, mostre o valor EXATO correspondente ao serviço escolhido na Tabela Oficial.
-                3. NÃO SEJA AFOBADA: Faça UMA pergunta por vez, seja o mais natural e humano possível.
-                4. ACAVALAMENTO E SUBCOLEÇÃO: SEMPRE use 'consultar_disponibilidade' antes de dar opções de horário.
-                5. NOME OBRIGATÓRIO: NUNCA use "Desconhecido". Se não tiver o nome, pergunte!` }]
+                REGRAS DE OURO:
+                1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
+                2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
+                3. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.` }]
             };
 
             let respostaFinal = "";
@@ -2200,7 +2202,8 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 nome: d.nome, 
                                                 percentual: d.percentualComissao || 50, 
                                                 agenda: d.agenda,
-                                                nomeBarbearia: d.nomeBarbearia || "Barbearia King" // 👈 PUXANDO A BARBEARIA
+                                                nomeBarbearia: d.nomeBarbearia || "Barbearia King",
+                                                donoUid: d.donoUid || doc.id // 👈 SALVA O DONO PARA BUSCAR O PREÇO CERTO
                                             };
                                         }
                                     }
@@ -2214,21 +2217,28 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     
                                     const novoInicio = timeToMin(horaFinal);
                                     
-                                    const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                                    // 🎯 AQUI MATAMOS O BUG DOS R$ 40! Ele busca o documento EXATO do dono desta barbearia!
+                                    const uidDoDono = barbeiroEncontrado.donoUid;
+                                    const ownerSnap = await db.collection('usuarios').doc(uidDoDono).get();
+                                    
                                     let valorServico = 40; 
                                     let nomeServicoOficial = fnArgs.servico;
                                     let duracaoServicoFinal = 40;
 
-                                    if (!ownerSnap.empty) {
-                                        const ownerData = ownerSnap.docs[0].data();
+                                    if (ownerSnap.exists) {
+                                        const ownerData = ownerSnap.data();
                                         const lista = ownerData.listaServicos || [];
                                         const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        
                                         const achado = lista.find(s => {
                                             const nomeS = s.nome || s;
                                             return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
                                         });
+                                        
                                         if (achado) {
                                             if (achado.valor) valorServico = Number(achado.valor);
+                                            else if (achado.preco) valorServico = Number(achado.preco);
+                                            
                                             if (achado.duracao) duracaoServicoFinal = Number(achado.duracao);
                                             nomeServicoOficial = achado.nome || achado;
                                         }
@@ -2267,7 +2277,7 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                             await db.collection('agendamentos').add({
                                                 barbeiroUid: barbeiroEncontrado.uid,
                                                 barbeiroNome: barbeiroEncontrado.nome,
-                                                nomeBarbearia: barbeiroEncontrado.nomeBarbearia, // 👈 SALVANDO A BARBEARIA AQUI
+                                                nomeBarbearia: barbeiroEncontrado.nomeBarbearia, 
                                                 clienteNome: fnArgs.clienteNome,
                                                 clienteTelefone: telefoneSalvar,
                                                 clienteUid: "whatsapp_guest",
@@ -2287,11 +2297,12 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
                                             });
                                             
+                                            // 🎯 AGORA A FERRAMENTA DEVOLVE O VALOR CORRETO PARA A IA!
                                             functionResult = { status: "SUCESSO", valor: valorServico };
                                         }
                                     }
                                 }
-                            } catch (e) { functionResult = { erro: "Erro ao agendar." }; }
+                            } catch (e) { functionResult = { erro: "Erro ao agendar: " + e.message }; }
                         }
 
                         // === 4. ATUALIZAR AGENDAMENTO ===
