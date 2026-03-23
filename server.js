@@ -1671,12 +1671,23 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                     }
                 });
 
-                // 💰 BUSCA OS SERVIÇOS (Lendo a sua estrutura exata!)
-                const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                // 💰 BUSCA OS SERVIÇOS (Filtro Anti-Conta Teste)
+                // Tiramos o .limit(1) para ele olhar todos os admins
+                const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).get();
+                
                 if (!ownerSnap.empty) {
-                    const ownerData = ownerSnap.docs[0].data();
-                    tabelaServicos = ownerData.listaServicos || [];
-                    console.log(`[DB] Encontrados ${tabelaServicos.length} serviços no banco.`);
+                    ownerSnap.forEach(doc => {
+                        const ownerData = doc.data();
+                        const listaDesteDono = ownerData.listaServicos || [];
+                        
+                        // Se a lista desse dono for maior que a anterior, ele substitui!
+                        // Isso garante que ele ignore o "Admin de teste" (que tem 2 itens) 
+                        // e fisgue o seu Admin Real (que tem 20 itens).
+                        if (listaDesteDono.length > tabelaServicos.length) {
+                            tabelaServicos = listaDesteDono;
+                        }
+                    });
+                    console.log(`[DB] Encontrados ${tabelaServicos.length} serviços reais no banco.`);
                 } else {
                     console.log("[AVISO] Proprietário não encontrado! O cardápio ficará vazio.");
                 }
