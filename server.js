@@ -1630,14 +1630,15 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             }
 
             // ============================================================
-            // 🔎 SUPER BUSCA: IDENTIDADE E CARGO (RBAC) E BARBEARIAS
+            // 🔎 SUPER BUSCA: IDENTIDADE E CARGO (RBAC), BARBEARIAS E SERVIÇOS
             // ============================================================
             let nomeConhecido = "";
             let tipoUsuario = "cliente"; 
             let isProprietario = false;
             let meuUid = "";
             let equipeNomes = [];
-            let equipePorBarbearia = {}; // 👈 NOVO: Dicionário de Barbearias
+            let equipePorBarbearia = {}; 
+            let tabelaServicos = []; // 👈 NOVO: Guarda a lista de serviços
 
             try {
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
@@ -1669,6 +1670,14 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                         equipePorBarbearia[barbeariaAtual].push(d.nome);
                     }
                 });
+
+                // 💰 NOVO: BUSCA A TABELA DE SERVIÇOS DO PROPRIETÁRIO NO BANCO
+                const ownerSnap = await db.collection('usuarios').where('isProprietario', '==', true).limit(1).get();
+                if (!ownerSnap.empty) {
+                    const ownerData = ownerSnap.docs[0].data();
+                    tabelaServicos = ownerData.listaServicos || [];
+                }
+
             } catch (e) {
                 console.log("[DB] Erro ao buscar identidade:", e.message);
             }
@@ -1809,6 +1818,13 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 .map(([barbearia, profissionais]) => `Na ${barbearia} trabalham: ${profissionais.join(', ')}`)
                 .join(' | ');
 
+            // 👈 NOVO: Transforma a tabela de serviços num "Cardápio" pra IA ler
+            const listaServicosTexto = tabelaServicos.map(s => {
+                const nomeS = s.nome || s;
+                const valorS = s.valor ? `R$ ${s.valor}` : "R$ 40";
+                return `${nomeS} (${valorS})`;
+            }).join(' | ');
+
             // ============================================================
             // 🤖 PERSONA MUTA-FORMA
             // ============================================================
@@ -1827,7 +1843,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                   PASSO 4: Pergunte a Data (Exija um dia específico, ex: "amanhã", "sexta-feira").
                   PASSO 5: Com a data e o barbeiro em mãos, use a ferramenta 'consultar_disponibilidade'. MOSTRE a lista de horários.
                   PASSO 6: Após ele escolher o horário da lista, se o Nome detectado for "Desconhecido", pergunte o nome dele!
-                  PASSO 7: Resuma os dados e peça a confirmação ("SIM").
+                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO conforme a Tabela de Serviços) e peça a confirmação ("SIM"). // 👈 ATUALIZADO AQUI
                   PASSO 8: Agende apenas após o SIM.`;
             }
 
@@ -1843,6 +1859,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
                 Aqui está a sua lista secreta de profissionais: [${listaBarbeariasTexto}]
+                Aqui está a TABELA DE SERVIÇOS E VALORES: [${listaServicosTexto || "Serviço Padrão (R$ 40)"}] // 👈 NOVO INSERIDO NA MEMÓRIA DA IA
                 
                 ${regrasCargos}
 
