@@ -1834,8 +1834,12 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             const API_KEY = process.env.GEMINI_API_KEY;
             const MODEL_NAME = "gemini-2.5-flash"; 
 
+            // 👇 MÁGICA NOVA: Forçando o relógio da IA para o fuso do Brasil
+            const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+            const dataFormatada = dataHojeBrasil.toLocaleDateString('pt-BR');
+
             const systemInstruction = {
-                parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é ${new Date().toLocaleDateString('pt-BR')}.
+                parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é dia ${dataFormatada}.
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
                 Aqui está a sua lista secreta de profissionais: [${listaBarbeariasTexto}]
