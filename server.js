@@ -1630,7 +1630,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             }
 
             // ============================================================
-            // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA (donoUid)
+            // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA
             // ============================================================
             let nomeConhecido = "";
             let tipoUsuario = "cliente"; 
@@ -1638,7 +1638,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             let meuUid = "";
             let equipeNomes = [];
             let equipePorBarbearia = {}; 
-            let tabelaServicosPorBarbearia = {}; // 👈 NOVO: Serviços separados por barbearia
+            let tabelaServicosPorBarbearia = {}; // 👈 Serviços separados por barbearia
 
             try {
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
@@ -1659,7 +1659,6 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
                 let cacheDonos = {};
 
-                // Usando for...of para permitir buscas assíncronas (await) dentro do loop
                 for (const doc of equipeSnap.docs) {
                     const d = doc.data();
                     if (d.nome) {
@@ -1672,7 +1671,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                         equipePorBarbearia[barbeariaAtual].push(d.nome);
 
                         // 🎯 A MÁGICA: Busca os serviços do donoUid específico deste barbeiro!
-                        let uidDoDono = d.donoUid || doc.id; // Se não tiver donoUid, ele mesmo é o dono
+                        let uidDoDono = d.donoUid || doc.id; 
                         
                         if (!tabelaServicosPorBarbearia[barbeariaAtual]) {
                             if (!cacheDonos[uidDoDono]) {
@@ -1822,21 +1821,6 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 ]
             }];
 
-            // Transforma o dicionário num texto fácil pra IA ler em segredo
-            const listaBarbeariasTexto = Object.entries(equipePorBarbearia)
-                .map(([barbearia, profissionais]) => `Na ${barbearia} trabalham: ${profissionais.join(', ')}`)
-                .join(' | ');
-
-            // 👈 LÊ A SUA ESTRUTURA EXATA DO BANCO DE DADOS
-            let listaServicosTexto = "Nenhum serviço cadastrado.";
-            if (tabelaServicos.length > 0) {
-                listaServicosTexto = tabelaServicos.map(s => {
-                    const nomeS = s.nome || "Serviço";
-                    const valorS = s.valor || 0;
-                    return `• ${nomeS} (R$ ${valorS})`;
-                }).join('\n'); // Quebrando em linhas para a IA ler melhor
-            }
-
             // 👈 MAPA COMPLETO PARA A IA (Barbearia -> Equipe -> Serviços Específicos)
             const listaCompletaIA = Object.keys(equipePorBarbearia).map(barbearia => {
                 const profissionais = equipePorBarbearia[barbearia].join(', ');
@@ -1882,7 +1866,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
                 Aqui está o MAPA COMPLETO de Barbearias, Profissionais e suas TABELAS DE SERVIÇOS EXCLUSIVAS:
-                ${listaCompletaIA}
+                \n${listaCompletaIA}
                 
                 ${regrasCargos}
 
