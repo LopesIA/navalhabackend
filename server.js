@@ -2212,8 +2212,6 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     
                                     const novoInicio = timeToMin(horaFinal);
                                     
-                                    // 🎯 AQUI MATAMOS O BUG DOS R$ 40 DE VEZ!
-                                    // Em vez de buscar no banco de novo, usamos a tabela perfeita da SUPER BUSCA!
                                     // 🎯 LISTA OFICIAL DE SERVIÇOS DA BARBEARIA
                                     const lista = tabelaServicosPorBarbearia[barbeiroEncontrado.nomeBarbearia] || [];
                                     
@@ -2260,62 +2258,62 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                         const novoFim = novoInicio + duracaoServicoFinal; 
                                         const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
 
-
-                                    if (!isValido) {
-                                        functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
-                                    } else {
-                                        const conflitoSnap = await db.collection('agendamentos')
-                                            .where('barbeiroUid', '==', barbeiroEncontrado.uid)
-                                            .where('data', '==', fnArgs.data)
-                                            .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                            .limit(100)
-                                            .get();
-
-                                        let temConflito = false;
-                                        conflitoSnap.forEach(doc => {
-                                            const ag = doc.data();
-                                            const ocInicio = timeToMin(ag.horario);
-                                            const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
-                                            const ocFim = ocInicio + ocDuracao; 
-                                            if (novoInicio < ocFim && novoFim > ocInicio) {
-                                                temConflito = true;
-                                            }
-                                        });
-
-                                        if (temConflito) {
-                                            functionResult = { erro: "HORÁRIO JÁ OCUPADO (Acavalamento detectado)." };
+                                        if (!isValido) {
+                                            functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
                                         } else {
-                                            const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
-                                            const telefoneSalvar = (typeof isProprietario !== 'undefined' && (isProprietario || tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional')) ? "whatsapp_gerencia" : remoteJidLimpo;
+                                            const conflitoSnap = await db.collection('agendamentos')
+                                                .where('barbeiroUid', '==', barbeiroEncontrado.uid)
+                                                .where('data', '==', fnArgs.data)
+                                                .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                                .limit(100)
+                                                .get();
 
-                                            await db.collection('agendamentos').add({
-                                                barbeiroUid: barbeiroEncontrado.uid,
-                                                barbeiroNome: barbeiroEncontrado.nome,
-                                                nomeBarbearia: barbeiroEncontrado.nomeBarbearia, 
-                                                clienteNome: fnArgs.clienteNome,
-                                                clienteTelefone: telefoneSalvar,
-                                                clienteUid: "whatsapp_guest",
-                                                data: fnArgs.data,
-                                                horario: horaFinal,
-                                                servico: nomeServicoOficial,
-                                                duracao: duracaoServicoFinal,
-                                                valor: valorServico,
-                                                valorOriginal: valorServico,
-                                                valorFinalPago: valorServico,
-                                                status: "confirmado",
-                                                origem: "whatsapp_bot",
-                                                ts: admin.firestore.FieldValue.serverTimestamp(),
-                                                visualizado: false,
-                                                comissaoCalculada: comissao,
-                                                percentualComissao: barbeiroEncontrado.percentual,
-                                                metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
+                                            let temConflito = false;
+                                            conflitoSnap.forEach(doc => {
+                                                const ag = doc.data();
+                                                const ocInicio = timeToMin(ag.horario);
+                                                const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
+                                                const ocFim = ocInicio + ocDuracao; 
+                                                if (novoInicio < ocFim && novoFim > ocInicio) {
+                                                    temConflito = true;
+                                                }
                                             });
-                                            
-                                            // 🎯 AGORA A FERRAMENTA DEVOLVE O VALOR CORRETO PARA A IA!
-                                            functionResult = { status: "SUCESSO", valor: valorServico };
+
+                                            if (temConflito) {
+                                                functionResult = { erro: "HORÁRIO JÁ OCUPADO (Acavalamento detectado)." };
+                                            } else {
+                                                const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
+                                                const telefoneSalvar = (typeof isProprietario !== 'undefined' && (isProprietario || tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional')) ? "whatsapp_gerencia" : remoteJidLimpo;
+
+                                                await db.collection('agendamentos').add({
+                                                    barbeiroUid: barbeiroEncontrado.uid,
+                                                    barbeiroNome: barbeiroEncontrado.nome,
+                                                    nomeBarbearia: barbeiroEncontrado.nomeBarbearia, 
+                                                    clienteNome: fnArgs.clienteNome,
+                                                    clienteTelefone: telefoneSalvar,
+                                                    clienteUid: "whatsapp_guest",
+                                                    data: fnArgs.data,
+                                                    horario: horaFinal,
+                                                    servico: nomeServicoOficial,
+                                                    duracao: duracaoServicoFinal,
+                                                    valor: valorServico,
+                                                    valorOriginal: valorServico,
+                                                    valorFinalPago: valorServico,
+                                                    status: "confirmado",
+                                                    origem: "whatsapp_bot",
+                                                    ts: admin.firestore.FieldValue.serverTimestamp(),
+                                                    visualizado: false,
+                                                    comissaoCalculada: comissao,
+                                                    percentualComissao: barbeiroEncontrado.percentual,
+                                                    metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
+                                                });
+                                                
+                                                // 🎯 AGORA A FERRAMENTA DEVOLVE O VALOR CORRETO PARA A IA!
+                                                functionResult = { status: "SUCESSO", valor: valorServico };
+                                            }
                                         }
-                                    }
-                                }
+                                    } // Fim do else (servicoEncontradoNoBanco)
+                                } // Fim do else (barbeiroEncontrado)
                             } catch (e) { functionResult = { erro: "Erro ao agendar: " + e.message }; }
                         }
 
