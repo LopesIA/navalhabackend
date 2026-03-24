@@ -1880,7 +1880,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 REGRAS DE OURO:
                 1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
                 2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
-                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NUMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
+                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente/não foi possível agendar, você DEVE enviar uma mensagem parecida com a seguinte frase: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NUMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade, puxe do dado donoUid no usuario no firebase] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
                 4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.` }]
             };
 
