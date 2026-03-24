@@ -2210,25 +2210,26 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     
                                     const novoInicio = timeToMin(horaFinal);
                                     
-                                    // 🎯 AQUI MATAMOS O BUG DOS R$ 40! Ele busca o documento EXATO do dono desta barbearia!
-                                    const uidDoDono = barbeiroEncontrado.donoUid;
-                                    const ownerSnap = await db.collection('usuarios').doc(uidDoDono).get();
+                                    // 🎯 AQUI MATAMOS O BUG DOS R$ 40 DE VEZ!
+                                    // Em vez de buscar no banco de novo, usamos a tabela perfeita da SUPER BUSCA!
+                                    const lista = tabelaServicosPorBarbearia[barbeiroEncontrado.nomeBarbearia] || [];
                                     
                                     let valorServico = 40; 
                                     let nomeServicoOficial = fnArgs.servico;
                                     let duracaoServicoFinal = 40;
 
-                                    if (ownerSnap.exists) {
-                                        const ownerData = ownerSnap.data();
-                                        const lista = ownerData.listaServicos || [];
+                                    if (lista.length > 0) {
                                         const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         
-                                        // BUSCA INTELIGENTE: Ordena do maior pro menor pra não confundir "Corte" com "Corte e Barba"
-                                        const listaOrdenada = [...lista].sort((a, b) => (b.nome || "").length - (a.nome || "").length);
+                                        // BUSCA INTELIGENTE: Ordena do maior pro menor pra não confundir nomes
+                                        const listaOrdenada = [...lista].sort((a, b) => {
+                                            const strA = String(a.nome || a || "");
+                                            const strB = String(b.nome || b || "");
+                                            return strB.length - strA.length;
+                                        });
                                         
                                         const achado = listaOrdenada.find(s => {
-                                            const nomeS = (s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                            // Flexibilidade máxima: Checa se são iguais, ou se um pedaço contém o outro
+                                            const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                             return nomeS === buscaServico || nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
                                         });
                                         
