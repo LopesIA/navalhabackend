@@ -1638,7 +1638,8 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
             let meuUid = "";
             let equipeNomes = [];
             let equipePorBarbearia = {}; 
-            let tabelaServicosPorBarbearia = {}; // 👈 Serviços separados por barbearia
+            let tabelaServicosPorBarbearia = {}; 
+            let telefonePorBarbearia = {}; // 👈 NOVO: Guarda o telefone do dono de cada unidade
 
             try {
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
@@ -1655,7 +1656,7 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                     }
                 }
 
-                // 🏢 BUSCA A EQUIPE E PUXA OS SERVIÇOS EXATOS DO DONO DE CADA UNIDADE
+                // 🏢 BUSCA A EQUIPE E PUXA OS SERVIÇOS/TELEFONE DO DONO DE CADA UNIDADE
                 const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
                 let cacheDonos = {};
 
@@ -1670,19 +1671,24 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                         }
                         equipePorBarbearia[barbeariaAtual].push(d.nome);
 
-                        // 🎯 A MÁGICA: Busca os serviços do donoUid específico deste barbeiro!
+                        // 🎯 A MÁGICA: Busca os serviços e o TELEFONE do donoUid!
                         let uidDoDono = d.donoUid || doc.id; 
                         
                         if (!tabelaServicosPorBarbearia[barbeariaAtual]) {
                             if (!cacheDonos[uidDoDono]) {
                                 const donoDoc = await db.collection('usuarios').doc(uidDoDono).get();
                                 if (donoDoc.exists) {
-                                    cacheDonos[uidDoDono] = donoDoc.data().listaServicos || [];
+                                    cacheDonos[uidDoDono] = donoDoc.data(); // Guarda tudo do dono
                                 } else {
-                                    cacheDonos[uidDoDono] = [];
+                                    cacheDonos[uidDoDono] = {};
                                 }
                             }
-                            tabelaServicosPorBarbearia[barbeariaAtual] = cacheDonos[uidDoDono];
+                            tabelaServicosPorBarbearia[barbeariaAtual] = cacheDonos[uidDoDono].listaServicos || [];
+                            
+                            // Pega o telefone e limpa o @s.whatsapp.net pra ficar só os números!
+                            let telDono = cacheDonos[uidDoDono].telefone || "";
+                            if (telDono.includes('@')) telDono = telDono.split('@')[0];
+                            telefonePorBarbearia[barbeariaAtual] = telDono || "Número não informado";
                         }
                     }
                 }
@@ -1821,16 +1827,17 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 ]
             }];
 
-            // 👈 MAPA COMPLETO PARA A IA (Barbearia -> Equipe -> Serviços Específicos)
+            // 👈 MAPA COMPLETO PARA A IA (Barbearia -> Contato -> Equipe -> Serviços)
             const listaCompletaIA = Object.keys(equipePorBarbearia).map(barbearia => {
                 const profissionais = equipePorBarbearia[barbearia].join(', ');
+                const telefoneUnidade = telefonePorBarbearia[barbearia]; // 👈 Puxa o telefone
                 const servicos = (tabelaServicosPorBarbearia[barbearia] || []).map(s => {
                     const n = s.nome || "Serviço";
                     const v = s.valor || s.preco || 0;
                     return `• ${n} (R$ ${v})`;
                 }).join('\n');
                 
-                return `💈 UNIDADE: ${barbearia}\n- Equipe: ${profissionais}\n- TABELA DE SERVIÇOS:\n${servicos || "Nenhum serviço cadastrado"}`;
+                return `💈 UNIDADE: ${barbearia}\n📱 CONTATO PRIVADO: ${telefoneUnidade}\n- Equipe: ${profissionais}\n- TABELA DE SERVIÇOS:\n${servicos || "Nenhum serviço cadastrado"}`;
             }).join('\n\n====================\n\n');
 
             // ============================================================
@@ -1865,18 +1872,19 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é dia ${dataFormatada}.
                 Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
                 
-                Aqui está o MAPA COMPLETO de Barbearias, Profissionais e suas TABELAS DE SERVIÇOS EXCLUSIVAS:
+                Aqui está o MAPA COMPLETO de Barbearias, Profissionais, Telefones e TABELAS DE SERVIÇOS:
                 \n${listaCompletaIA}
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO E ATALHOS:
+                REGRAS DE OURO:
                 1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
-                2. NÃO INVENTE SERVIÇOS: Na hora de usar a ferramenta criar_agendamento, envie no campo "servico" EXATAMENTE o nome como está escrito na tabela.
-                3. O ATALHO DO CLIENTE APRESSADO: Se o cliente já informar a data E o horário exatos, faça a consulta de disponibilidade em silêncio. Se o horário estiver livre, PULE O PASSO DE MOSTRAR A LISTA e vá direto para o Passo 7 (Resumo e Confirmação).
-                4. NÃO SEJA AFOBADA: Se o cliente não der a hora, faça UMA pergunta por vez.` }]
+                2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
+                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NUMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
+                4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.` }]
             };
 
+            // MANTENHA A LINHA ABAIXO INTACTA
             let respostaFinal = "";
 
             try {
