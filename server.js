@@ -1870,10 +1870,11 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO:
+                REGRAS DE OURO E ATALHOS:
                 1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
-                2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
-                3. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.` }]
+                2. NÃO INVENTE SERVIÇOS: Na hora de usar a ferramenta criar_agendamento, envie no campo "servico" EXATAMENTE o nome como está escrito na tabela.
+                3. O ATALHO DO CLIENTE APRESSADO: Se o cliente já informar a data E o horário exatos, faça a consulta de disponibilidade em silêncio. Se o horário estiver livre, PULE O PASSO DE MOSTRAR A LISTA e vá direto para o Passo 7 (Resumo e Confirmação).
+                4. NÃO SEJA AFOBADA: Se o cliente não der a hora, faça UMA pergunta por vez.` }]
             };
 
             let respostaFinal = "";
@@ -2214,9 +2215,13 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                         const lista = ownerData.listaServicos || [];
                                         const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
                                         
-                                        const achado = lista.find(s => {
-                                            const nomeS = s.nome || s;
-                                            return nomeS.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(buscaServico);
+                                        // BUSCA INTELIGENTE: Ordena do maior pro menor pra não confundir "Corte" com "Corte e Barba"
+                                        const listaOrdenada = [...lista].sort((a, b) => (b.nome || "").length - (a.nome || "").length);
+                                        
+                                        const achado = listaOrdenada.find(s => {
+                                            const nomeS = (s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                            // Flexibilidade máxima: Checa se são iguais, ou se um pedaço contém o outro
+                                            return nomeS === buscaServico || nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
                                         });
                                         
                                         if (achado) {
