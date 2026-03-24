@@ -1877,11 +1877,13 @@ if (numeroRemetente && numeroRemetente.includes('@lid')) {
                 
                 ${regrasCargos}
 
-                REGRAS DE OURO:
+                REGRAS DE OURO E ATALHOS:
                 1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
                 2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
-                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente/não foi possível agendar, você DEVE enviar uma mensagem parecida com a seguinte frase: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NUMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade, puxe do dado donoUid no usuario no firebase] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
-                4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.` }]
+                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NÚMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
+                4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.
+                5. PROIBIDO EMENDAR FUNÇÕES: Após usar a ferramenta "consultar_disponibilidade", você é OBRIGADA a responder ao cliente com uma mensagem de texto (fazendo o Resumo do Passo 7). NUNCA chame a função "criar_agendamento" sem que o cliente tenha digitado "SIM".
+                6. O ATALHO DO CLIENTE APRESSADO: Se o cliente já informar a data E o horário exatos, faça a consulta de disponibilidade em silêncio. Se o horário que ele pediu estiver na lista de livres, vá direto para o Passo 7 (Resumo). Se não estiver livre, mostre-lhe a lista de horários disponíveis.` }]
             };
 
             // MANTENHA A LINHA ABAIXO INTACTA
@@ -2212,28 +2214,36 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     
                                     // 🎯 AQUI MATAMOS O BUG DOS R$ 40 DE VEZ!
                                     // Em vez de buscar no banco de novo, usamos a tabela perfeita da SUPER BUSCA!
+                                    // 🎯 LISTA OFICIAL DE SERVIÇOS DA BARBEARIA
                                     const lista = tabelaServicosPorBarbearia[barbeiroEncontrado.nomeBarbearia] || [];
                                     
-                                    let valorServico = 40; 
-                                    let nomeServicoOficial = fnArgs.servico;
-                                    let duracaoServicoFinal = 40;
+                                    let valorServico = 0; 
+                                    let nomeServicoOficial = "";
+                                    let duracaoServicoFinal = 30; // Duração padrão segura
+                                    let servicoEncontradoNoBanco = false; // A nossa Trava de Segurança!
 
                                     if (lista.length > 0) {
-                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                                         
-                                        // BUSCA INTELIGENTE: Ordena do maior pro menor pra não confundir nomes
-                                        const listaOrdenada = [...lista].sort((a, b) => {
-                                            const strA = String(a.nome || a || "");
-                                            const strB = String(b.nome || b || "");
-                                            return strB.length - strA.length;
+                                        // 1️⃣ TENTATIVA 1: BUSCA EXATA (Garante que "Corte" não puxe "Corte e Barba")
+                                        let achado = lista.find(s => {
+                                            const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                            return nomeS === buscaServico;
                                         });
+
+                                        // 2️⃣ TENTATIVA 2: BUSCA APROXIMADA (Só entra aqui se a IA errou alguma letra boba)
+                                        if (!achado) {
+                                            const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
+                                            achado = listaOrdenada.find(s => {
+                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
+                                            });
+                                        }
                                         
-                                        const achado = listaOrdenada.find(s => {
-                                            const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                            return nomeS === buscaServico || nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
-                                        });
-                                        
+                                        // SE ACHOU COM SUCESSO, PEGA OS VALORES REAIS DO SEU BANCO DE DADOS
                                         if (achado) {
+                                            servicoEncontradoNoBanco = true;
+                                            
                                             if (achado.valor) valorServico = Number(achado.valor);
                                             else if (achado.preco) valorServico = Number(achado.preco);
                                             
@@ -2242,8 +2252,14 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                         }
                                     }
 
-                                    const novoFim = novoInicio + duracaoServicoFinal; 
-                                    const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
+                                    // 🛑 GOLPE FATAL: Se a IA inventou um serviço, aborta o agendamento imediatamente!
+                                    if (!servicoEncontradoNoBanco) {
+                                        functionResult = { erro: `O serviço '${fnArgs.servico}' NÃO EXISTE na tabela oficial. Use exatamente os nomes listados no cardápio.` };
+                                    } else {
+                                        // Continua com o agendamento normal porque o serviço e o preço estão 100% corretos!
+                                        const novoFim = novoInicio + duracaoServicoFinal; 
+                                        const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
+
 
                                     if (!isValido) {
                                         functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
