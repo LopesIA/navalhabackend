@@ -2859,6 +2859,98 @@ app.get('/desligar-trava', async (req, res) => {
 });
 
 // ==================================================================
+// 🧪 ROTA TEMPORÁRIA: TESTE DE BUSCA NO BANCO + WHATSAPP
+// ==================================================================
+app.get('/cron/teste-whatsapp-busca', async (req, res) => {
+    console.log("[TESTE] Iniciando busca no banco pelo nome 'Mikaela'...");
+
+    const nomeBusca = "mikaela"; // O nome que o sistema vai caçar no banco
+    let numeroEncontrado = null;
+    let nomeCompletoEncontrado = null;
+
+    try {
+        // 1. 🕵️‍♂️ MÁQUINA DE DESCOBERTA (Busca no Firestore)
+        const usersSnap = await db.collection('usuarios').get();
+        
+        usersSnap.forEach(doc => {
+            const u = doc.data();
+            if (u.nome && u.telefone) {
+                // Tira acentos e deixa tudo minúsculo para não ter erro de digitação
+                const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                
+                if (nomeBanco.includes(nomeBusca)) {
+                    numeroEncontrado = u.telefone;
+                    nomeCompletoEncontrado = u.nome;
+                }
+            }
+        });
+
+        // Se não achou ninguém com esse nome
+        if (!numeroEncontrado) {
+            return res.status(404).send(`<h1>❌ CLIENTE NÃO ENCONTRADA</h1><p>O sistema vasculhou o banco, mas não achou ninguém chamado '${nomeBusca}'. Verifique como o nome está escrito lá no Firestore.</p>`);
+        }
+
+        console.log(`[TESTE] Cliente encontrada: ${nomeCompletoEncontrado} | Telefone original: ${numeroEncontrado}`);
+
+        // 2. 🧹 LIMPEZA DO NÚMERO (Tira parênteses, traços e bota o 55)
+        let numeroLimpo = numeroEncontrado;
+        if (!numeroEncontrado.includes('@lid')) {
+            numeroLimpo = numeroEncontrado.replace(/[^0-9]/g, ''); // Deixa só números
+            
+            // Se o número não começar com 55 (Brasil) e tiver tamanho normal, a gente adiciona
+            if (!numeroLimpo.startsWith('55') && numeroLimpo.length >= 10) {
+                numeroLimpo = '55' + numeroLimpo;
+            }
+        }
+
+        console.log(`[TESTE] Disparando WhatsApp para o número limpo: ${numeroLimpo}`);
+
+        // 3. 🚀 DISPARO NA EVOLUTION API
+        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
+        const API_KEY_EVO = "Ja997640401"; 
+        const nomeDaInstancia = "KingAgenda"; 
+        const textoTeste = "comprovando teste!";
+
+        const body = { 
+            number: numeroLimpo, 
+            text: textoTeste 
+        };
+        
+        // Passa a trava checkNumber=false na URL para evitar bloqueios chatos da API
+        const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+        
+        const r = await fetch(urlEvo, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json', 
+                'apikey': API_KEY_EVO 
+            },
+            body: JSON.stringify(body)
+        });
+
+        if (r.ok) {
+            res.status(200).send(`
+                <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                    <h1 style="color: #2ecc71;">✅ MÁGICA CONCLUÍDA!</h1>
+                    <p>O sistema procurou por <b>"${nomeBusca}"</b> e encontrou: <b>${nomeCompletoEncontrado}</b>.</p>
+                    <p>O número capturado no banco foi: <b>${numeroEncontrado}</b></p>
+                    <p>O número formatado e enviado foi: <b>${numeroLimpo}</b></p>
+                    <p>A mensagem "comprovando teste!" foi disparada. Verifique o WhatsApp!</p>
+                </div>
+            `);
+        } else {
+            const erroTexto = await r.text();
+            res.status(500).send(`<h1>❌ FALHA NA EVOLUTION.</h1><p>Achamos o número (${numeroLimpo}), mas a API recusou. Motivo: ${erroTexto}</p>`);
+        }
+
+    } catch (e) {
+        console.error("[TESTE ZAP] Erro no código:", e.message);
+        res.status(500).send(`<h1>❌ ERRO FATAL</h1><p>${e.message}</p>`);
+    }
+});
+// ==================================================================
+
+// ==================================================================
 // FIM DA ROTA DE CRON
 // ==================================================================
 
