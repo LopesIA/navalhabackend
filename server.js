@@ -914,7 +914,7 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (MOTOR MATEMÁTICO 5 FASES + RETENÇÃO CONTA-GOTAS ANTI-BAN) ---
+// --- CRON JOB ATUALIZADO (BLINDAGEM ANTI-GAFE POR TELEFONE E CONTA-GOTAS) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
@@ -924,7 +924,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
     console.log("[CRON] Iniciando ciclo de notificações (5 Fases)...");
 
-    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
@@ -954,7 +953,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
     };
 
-    // --- CÁLCULOS DE DATAS ---
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
 
     const formatDateIso = (d) => {
@@ -981,7 +979,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const dataOntem = formatDateIso(dataOntemObj);
     const dataAlvo25d = formatDateIso(dataVinteCincoDiasObj);
 
-    // --- TEXTOS PADRÃO (RODAPÉ) ---
     const notaCancelamento = "\n\nSe acontecer algum imprevisto e não tiver como comparecer, é só me avisar ou pedir pra cancelar por aqui mesmo, que eu resolvo pra você! 🔄";
     const notaIA = "\n\n*eu sou uma ia, se eu demorar mais de 30 segundos pra responder, reenvie sua mensagem, pois eu posso não ter recebido*";
 
@@ -1064,7 +1061,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // FASE 4: ONTEM (Pós-Venda + Check da Recorrência 24h Depois)
+        // FASE 4: ONTEM (Pós-Venda + Check da Recorrência)
         // =====================================================================
         const snapOntem = await db.collection('agendamentos').where('data', '==', dataOntem).where('status', '==', 'concluido').get();
 
@@ -1076,41 +1073,42 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const minutosPassados = Math.floor((agoraBrasil.getTime() - horaAgendamentoOntem.getTime()) / 60000);
 
             if (minutosPassados <= 1470 && minutosPassados >= 1410) {
-                const futureSnap = await db.collection('agendamentos')
-                    .where('clienteUid', '==', ag.clienteUid)
-                    .where('status', 'in', ['confirmado', 'conclusão pendente', 'pendente'])
-                    .where('data', '>', dataHoje).orderBy('data', 'asc').limit(1).get();
-
+                
+                // Pesquisa por TELEFONE para evitar erros de UID
+                let temAgendamentoFuturo = false;
                 let textoFuturo = "Que tal já deixar o próximo horário garantido para não correr o risco de ficar sem vaga? É só me pedir!";
-                if (!futureSnap.empty) {
-                    const proxAg = futureSnap.docs[0].data();
-                    textoFuturo = `Vi aqui no sistema que o seu próximo agendamento (recorrente) já está marcado para o dia ${formatDataBR(proxAg.data)} às ${proxAg.horario}.\n\nDeseja manter esse agendamento ou prefere remarcar/cancelar?`;
-                }
-
+                
                 if (ag.clienteTelefone) {
+                    const futureSnap = await db.collection('agendamentos').where('clienteTelefone', '==', ag.clienteTelefone).get();
+                    futureSnap.forEach(fDoc => {
+                        const historicoFuturo = fDoc.data();
+                        // Se achou um agendamento pra amanhã em diante
+                        if (historicoFuturo.data > dataHoje && ['confirmado', 'conclusão pendente', 'pendente'].includes(historicoFuturo.status)) {
+                            temAgendamentoFuturo = true;
+                            textoFuturo = `Vi aqui no sistema que o seu próximo agendamento já está marcado para o dia ${formatDataBR(historicoFuturo.data)} às ${historicoFuturo.horario}.\n\nDeseja manter esse agendamento ou prefere remarcar/cancelar?`;
+                        }
+                    });
+
                     const msgZap = `✨ *Obrigado pela visita!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer sua presença ontem. Esperamos que tenha curtido o talento! ✂️\n\n${textoFuturo}${notaCancelamento}${notaIA}`;
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                 }
+                
                 batch.update(doc.ref, { posCorteEnviado: true });
                 contadorEnvios++;
             }
         }
 
         // =====================================================================
-        // FASE 5: RETENÇÃO INTELIGENTE (>25 DIAS) - MODO CONTA-GOTAS
+        // FASE 5: RETENÇÃO (>25 DIAS) - MÁXIMA SEGURANÇA POR TELEFONE
         // =====================================================================
-        // Só manda mensagem em horário comercial (entre 09:00 e 19:59)
         const horaAtual = agoraBrasil.getHours();
         
         if (horaAtual >= 9 && horaAtual < 20) {
-            // Lemos onde o "cursor" de busca parou pela última vez
             let configDoc = await db.collection('config').doc('varredura_retencao').get();
-            let dataVarredura = dataAlvo25d; // Por padrão, começa varrendo 25 dias atrás exatos
+            let dataVarredura = dataAlvo25d; 
             
             if (configDoc.exists && configDoc.data().dataCursor) {
                 dataVarredura = configDoc.data().dataCursor;
-                // Proteção: Se a varredura já entrou pro futuro (o que é impossível, mas previne bugs)
-                // ou se varreu anos atrás (chegou em 2020), resetamos pro dia de -25 atual para recomeçar o loop eterno.
                 if (dataVarredura > dataAlvo25d || parseInt(dataVarredura.split('-')[0]) < 2023) {
                     dataVarredura = dataAlvo25d;
                 }
@@ -1126,33 +1124,40 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             let enviosNestaRodada = 0;
 
             for (const doc of snapAtrasados.docs) {
-                if (enviosNestaRodada >= 5) break; // TRAVA DE SEGURANÇA: MÁXIMO DE 5 POR VEZ (1 a cada minuto)
+                if (enviosNestaRodada >= 5) break; 
                 
                 const ag = doc.data();
-                // Se já avisou esse cara sobre esse corte ou não tem fone, pula.
                 if (ag.retencaoEnviada || !ag.clienteTelefone) continue;
                 
-                // VERIFICAÇÃO DE PROVA REAL: Ele realmente sumiu?
-                const cortesRecentes = await db.collection('agendamentos')
-                    .where('clienteUid', '==', ag.clienteUid)
-                    .where('data', '>', dataVarredura)
-                    .where('status', 'in', ['concluido', 'confirmado', 'conclusão pendente', 'imediato', 'pendente'])
+                // 🛡️ A MURALHA DE FOGO: BUSCA PELO TELEFONE
+                const todosAgendamentosDesseCliente = await db.collection('agendamentos')
+                    .where('clienteTelefone', '==', ag.clienteTelefone)
                     .get();
+                
+                let realmenteSumiu = true;
 
-                if (cortesRecentes.empty) {
-                    // O CLIENTE REALMENTE SUMIU!
+                todosAgendamentosDesseCliente.forEach(d => {
+                    const historico = d.data();
+                    // Se o número de telefone cortou o cabelo DEPOIS da data de varredura, ou tem algo agendado pro futuro...
+                    if (historico.data > dataVarredura && ['concluido', 'confirmado', 'conclusão pendente', 'imediato', 'pendente'].includes(historico.status)) {
+                        realmenteSumiu = false;
+                    }
+                });
+
+                if (realmenteSumiu) {
                     const msgZap = `✂️ *Sentimos sua falta!*\n\nFala ${ag.clienteNome || 'campeão'}, tudo bem?\nDei uma olhada aqui e vi que já faz um tempinho desde o seu último corte com o *${ag.barbeiroNome}*.\n\nSeu estilo é a sua marca registrada! Que tal já garantir um horário pra dar aquele talento de respeito no visual?\n\nÉ só me falar o melhor dia ou pedir pra agendar! 💈${notaIA}`;
                     
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                     enviosNestaRodada++;
                     contadorEnvios++;
+                } else {
+                    console.log(`[RETENÇÃO] Falso positivo evitado! O telefone ${ag.clienteTelefone} esteve na barbearia recentemente.`);
                 }
 
-                // De qualquer forma, carimba o doc para não investigar ele de novo amanhã
+                // Carimba que o agendamento daquela data específica já foi checado
                 batch.update(doc.ref, { retencaoEnviada: true });
             }
 
-            // O MESTRE DA VARREDURA: Se processou poucos (ou seja, limpou esse dia), anda 1 dia pra trás no tempo
             if (enviosNestaRodada < 5) {
                 const dataVObj = new Date(dataVarredura + 'T12:00:00');
                 dataVObj.setDate(dataVObj.getDate() - 1);
@@ -1163,8 +1168,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                     ts: admin.firestore.FieldValue.serverTimestamp()
                 });
             }
-        } else {
-            console.log("[CRON] Retenção pausada agora para não incomodar os clientes de madrugada.");
         }
 
         await batch.commit();
