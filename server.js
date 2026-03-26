@@ -914,15 +914,16 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (MOTOR MATEMÁTICO 5 FASES + PÓS-VENDA) ---
+// --- CRON JOB ATUALIZADO (MOTOR MATEMÁTICO 5 FASES + RETENÇÃO BLINDADA) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
+    // Verificação de segurança
     if (key !== process.env.CRON_SECRET_KEY && key !== "Ja997640401") {
         return res.status(401).send('Unauthorized');
     }
 
-    console.log("[CRON] Iniciando ciclo de notificações (5 Fases)...");
+    console.log("[CRON] Iniciando ciclo de notificações de 5 Fases...");
 
     // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP (COM CORREÇÃO 55)
     const enviarWhatsAppCron = async (destino, texto) => {
@@ -935,6 +936,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
             numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+            // 🛡️ TRAVA DO 55
             if (!numeroLimpo.startsWith('55') && numeroLimpo.length >= 10) {
                 numeroLimpo = '55' + numeroLimpo;
             }
@@ -954,7 +956,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
     };
 
-    // --- CÁLCULOS DE DATAS ---
+    // --- CÁLCULOS DE DATAS (FUSO HORÁRIO DO BRASIL) ---
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
 
     const formatDateIso = (d) => {
@@ -969,17 +971,20 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         return `${partes[2]}/${partes[1]}`;
     };
 
+    // Criando as datas de referência
     const dataHojeObj = new Date(agoraBrasil);
     const dataAmanhaObj = new Date(agoraBrasil); dataAmanhaObj.setDate(dataHojeObj.getDate() + 1);
     const dataQuatroDiasObj = new Date(agoraBrasil); dataQuatroDiasObj.setDate(dataHojeObj.getDate() + 4);
     const dataOntemObj = new Date(agoraBrasil); dataOntemObj.setDate(dataHojeObj.getDate() - 1);
+    const dataVinteCincoDiasObj = new Date(agoraBrasil); dataVinteCincoDiasObj.setDate(dataHojeObj.getDate() - 25);
 
     const dataHoje = formatDateIso(dataHojeObj);
     const dataAmanha = formatDateIso(dataAmanhaObj);
     const dataQuatroDias = formatDateIso(dataQuatroDiasObj);
     const dataOntem = formatDateIso(dataOntemObj);
+    const dataAlvo25d = formatDateIso(dataVinteCincoDiasObj);
 
-    // --- TEXTOS PADRÃO (RODAPÉ) ---
+    // --- TEXTOS PADRÃO (RODAPÉ DE TODAS AS MENSAGENS) ---
     const notaCancelamento = "\n\nSe acontecer algum imprevisto e não tiver como comparecer, é só me avisar ou pedir pra cancelar por aqui mesmo, que eu resolvo pra você! 🔄";
     const notaIA = "\n\n*eu sou uma ia, se eu demorar mais de 30 segundos pra responder, reenvie sua mensagem, pois eu posso não ter recebido*";
 
@@ -988,7 +993,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
     try {
         // =====================================================================
-        // 1. BUSCA O DIA DE HOJE (Lembretes de 1 Hora e 20 Minutos)
+        // FASE 1: HOJE (Lembretes de 1 Hora e 20 Minutos)
         // =====================================================================
         const snapHoje = await db.collection('agendamentos')
             .where('data', '==', dataHoje)
@@ -1006,7 +1011,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const diffMs = horaAgendamento.getTime() - agoraBrasil.getTime();
             const minutosFaltando = Math.floor(diffMs / 60000);
 
-            // A. LEMBRETE DE 1 HORA
+            // A. LEMBRETE DE 1 HORA (Entre 45 e 65 min)
             if (minutosFaltando <= 65 && minutosFaltando >= 45 && !ag.lembrete1hEnviado) {
                 if (ag.clienteTelefone) {
                     const msgZap = `⏰ *Lembrete King Agenda*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para lembrar que o seu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\n\nTe esperamos lá! ✂️${notaCancelamento}${notaIA}`;
@@ -1015,7 +1020,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 batch.update(doc.ref, { lembrete1hEnviado: true });
                 contadorEnvios++;
             }
-            // B. LEMBRETE DE 20 MINUTOS
+            // B. LEMBRETE DE 20 MINUTOS (Entre 5 e 25 min)
             else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado && !ag.lembrete10minEnviado) {
                 if (ag.clienteTelefone) {
                     const msgZap = `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!${notaCancelamento}${notaIA}`;
@@ -1027,7 +1032,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // 2. BUSCA O DIA DE AMANHÃ (Aviso de 24 Horas Antes)
+        // FASE 2: AMANHÃ (Aviso de 24 Horas Antes)
         // =====================================================================
         const snapAmanha = await db.collection('agendamentos')
             .where('data', '==', dataAmanha)
@@ -1042,7 +1047,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const horaAgendamentoAmanha = new Date(dataAmanhaObj);
             horaAgendamentoAmanha.setHours(horas, minutos, 0, 0);
 
-            // Se faltar entre 23h30 e 24h30 (Janela de 1 dia exato)
+            // Janela exata de 24h (entre 1410 e 1470 minutos faltando)
             const diffMs = horaAgendamentoAmanha.getTime() - agoraBrasil.getTime();
             const minutosFaltando = Math.floor(diffMs / 60000);
 
@@ -1057,7 +1062,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // 3. BUSCA DAQUI A 4 DIAS (Aviso Antecipado)
+        // FASE 3: DAQUI A 4 DIAS (Antecipação)
         // =====================================================================
         const snapQuatroDias = await db.collection('agendamentos')
             .where('data', '==', dataQuatroDias)
@@ -1072,12 +1077,13 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const horaAgendamento4d = new Date(dataQuatroDiasObj);
             horaAgendamento4d.setHours(horas, minutos, 0, 0);
 
+            // Janela exata de 4 dias (entre 5730 e 5790 minutos faltando)
             const diffMs = horaAgendamento4d.getTime() - agoraBrasil.getTime();
             const minutosFaltando = Math.floor(diffMs / 60000);
 
             if (minutosFaltando <= 5790 && minutosFaltando >= 5730) {
                 if (ag.clienteTelefone) {
-                    const msgZap = `📅 *Agendamento Confirmado!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Seu agendamento de *${ag.servico}* com *${ag.barbeiroNome}* está chegando. Será no dia ${formatDataBR(dataQuatroDias)} às ${ag.horario}.${notaCancelamento}${notaIA}`;
+                    const msgZap = `📅 *Agendamento Confirmado!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Seu agendamento de *${ag.servico}* com *${ag.barbeiroNome}* está chegando.\nSerá no dia ${formatDataBR(dataQuatroDias)} às ${ag.horario}.${notaCancelamento}${notaIA}`;
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                 }
                 batch.update(doc.ref, { lembrete4dEnviado: true });
@@ -1086,7 +1092,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // 4. BUSCA O DIA DE ONTEM (Agradecimento e Pesquisa de Futuro 24h Depois)
+        // FASE 4: ONTEM (Pós-Venda + Check da Recorrência 24h Depois)
         // =====================================================================
         const snapOntem = await db.collection('agendamentos')
             .where('data', '==', dataOntem)
@@ -1101,31 +1107,31 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const horaAgendamentoOntem = new Date(dataOntemObj);
             horaAgendamentoOntem.setHours(horas, minutos, 0, 0);
 
-            // Minutos passados desde o agendamento de ontem
             const diffMs = agoraBrasil.getTime() - horaAgendamentoOntem.getTime();
             const minutosPassados = Math.floor(diffMs / 60000);
 
-            // Verifica se já se passaram exatamente 24 horas (entre 23h30 e 24h30 depois do corte)
+            // Exatas 24h APÓS o horário do corte
             if (minutosPassados <= 1470 && minutosPassados >= 1410) {
                 
-                // 🔍 O PULO DO GATO: Vamos procurar se esse cara tem agenda pro futuro
+                // Busca se ele tem algum agendamento pro futuro
                 const futureSnap = await db.collection('agendamentos')
                     .where('clienteUid', '==', ag.clienteUid)
                     .where('status', 'in', ['confirmado', 'conclusão pendente', 'pendente'])
-                    .where('data', '>', dataHoje) // Qualquer dia maior que hoje
+                    .where('data', '>', dataHoje) 
                     .orderBy('data', 'asc')
                     .limit(1)
                     .get();
 
-                let textoFuturo = "Que tal já deixar o próximo horário garantido para não correr o risco de ficar sem vaga? É só me pedir!";
+                let textoFuturo = "Que tal já deixar o próximo horário garantido para não correr o risco de ficar sem vaga? É só me pedir que eu agendo pra você!";
 
+                // Se achou, muda o texto para confirmar a recorrência
                 if (!futureSnap.empty) {
                     const proxAg = futureSnap.docs[0].data();
-                    textoFuturo = `Vi aqui no sistema que o seu próximo agendamento (recorrente) já está marcado para o dia ${formatDataBR(proxAg.data)} às ${proxAg.horario}.\n\nDeseja manter esse agendamento ou prefere remarcar/cancelar?`;
+                    textoFuturo = `Vi aqui no sistema que o seu próximo agendamento já está marcado para o dia ${formatDataBR(proxAg.data)} às ${proxAg.horario}.\n\nDeseja manter esse agendamento ou prefere remarcar/cancelar?`;
                 }
 
                 if (ag.clienteTelefone) {
-                    const msgZap = `✨ *Obrigado pela visita!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer sua presença ontem. Esperamos que tenha curtido o talento! ✂️\n\n${textoFuturo}${notaCancelamento}${notaIA}`;
+                    const msgZap = `✨ *Obrigado pela visita!*\n\nFala ${ag.clienteNome || 'campeão'}! Passando para agradecer sua presença ontem. Esperamos que tenha curtido o talento! ✂️\n\n${textoFuturo}${notaIA}`;
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                 }
                 
@@ -1135,23 +1141,50 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // 5. RETENÇÃO MENSAL (CLIENTES SUMIDOS HÁ 25 DIAS)
+        // FASE 5: RETENÇÃO BLINDADA (Sumiço de exatos 25 dias)
         // =====================================================================
-        if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
-            const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
+        // Só roda durante o dia (entre 09:00 e 19:59) para não mandar mensagem de madrugada
+        const horaAtual = agoraBrasil.getHours();
+        if (horaAtual >= 9 && horaAtual < 20) {
             
-            const usuariosSumidos = await db.collection('usuarios')
-                .where('tipo', '==', 'cliente')
-                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(50) 
+            // Busca os cortes que aconteceram há EXATOS 25 dias atrás
+            const snapCortesAntigos = await db.collection('agendamentos')
+                .where('data', '==', dataAlvo25d)
+                .where('status', '==', 'concluido')
                 .get();
 
-            for (const doc of usuariosSumidos.docs) {
-                const uData = doc.data();
-                if (uData.telefone) {
-                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só me avisar aqui mesmo!${notaIA}`;
-                    await enviarWhatsAppCron(uData.telefone, msgZap);
+            for (const doc of snapCortesAntigos.docs) {
+                const ag = doc.data();
+                
+                // Se já enviou essa cobrança ou não tem telefone, pula
+                if (ag.retencao25dEnviada || !ag.clienteTelefone) continue;
+
+                // 🕵️‍♂️ VERIFICAÇÃO NA MEMÓRIA (BLINDAGEM ANTI-SPAM)
+                // O cliente voltou e cortou o cabelo DEPOIS daquela data de 25 dias atrás?
+                const todosAgendamentosDesseCliente = await db.collection('agendamentos')
+                    .where('clienteUid', '==', ag.clienteUid)
+                    .get();
+                
+                let realmenteSumiu = true;
+
+                todosAgendamentosDesseCliente.forEach(d => {
+                    const historico = d.data();
+                    // Se a data for MAIOR que 25 dias atrás E for um corte ativo/concluído... ele não sumiu!
+                    if (historico.data > dataAlvo25d && ['concluido', 'confirmado', 'conclusão pendente', 'imediato'].includes(historico.status)) {
+                        realmenteSumiu = false;
+                    }
+                });
+
+                // Se o sistema confirmou que ele sumiu mesmo, dispara o míssil!
+                if (realmenteSumiu) {
+                    const msgZap = `✂️ *Sentimos sua falta!*\n\nFala ${ag.clienteNome || 'campeão'}, tudo bem?\nDei uma olhada aqui e vi que faz exatos 25 dias desde o seu último corte com o *${ag.barbeiroNome}*.\n\nSeu estilo é a sua marca registrada! Que tal já garantir um horário pra dar aquele talento de respeito no visual?\n\nÉ só me falar o melhor dia ou pedir pra agendar! 💈${notaIA}`;
+                    
+                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+                    contadorEnvios++;
                 }
+
+                // De qualquer forma, carimba no banco que esse corte de 25 dias já foi processado
+                batch.update(doc.ref, { retencao25dEnviada: true });
             }
         }
 
