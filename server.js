@@ -2865,6 +2865,118 @@ app.get('/desligar-trava', async (req, res) => {
 });
 
 // ==================================================================
+// 🔁 CRON JOB: PROCESSAR RECORRÊNCIAS (GERAR FUTUROS)
+// Recomendado rodar 1x ao dia (Ex: 03:00 da manhã) via UptimeRobot
+// Rota: /cron/processar-recorrencias?key=SUA_CHAVE
+// ==================================================================
+app.get('/cron/processar-recorrencias', async (req, res) => {
+    const { key } = req.query;
+    
+    // Verificação de segurança (mesma do lembrete)
+    if (key !== process.env.CRON_SECRET_KEY && key !== "Ja997640401") {
+        return res.status(401).send('Unauthorized');
+    }
+
+    console.log("[CRON RECORRÊNCIA] Iniciando varredura de recorrências ativas...");
+
+    try {
+        // Data e fuso horário corretos (Brasília)
+        const agora = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+        
+        // Limite de segurança: Mantemos a agenda preenchida sempre por 60 dias no futuro
+        const limiteFuturo = new Date(agora);
+        limiteFuturo.setDate(limiteFuturo.getDate() + 60);
+
+        // 1. Busca as "Mães" (configurações ativas)
+        const snapRecorrencias = await db.collection('config_recorrencias')
+            .where('ativa', '==', true)
+            .get();
+
+        if (snapRecorrencias.empty) {
+            return res.status(200).send("OK: Nenhuma recorrência ativa encontrada.");
+        }
+
+        const batch = db.batch();
+        let totalGerados = 0;
+        let totalConfiguracoesAtualizadas = 0;
+
+        snapRecorrencias.forEach(doc => {
+            const config = doc.data();
+            if (!config.ultimaDataGerada || !config.intervaloDias) return;
+
+            // Transforma a data salva em objeto Date (usamos T12:00:00 para não ter problema de fuso)
+            let dataUltima = new Date(config.ultimaDataGerada + 'T12:00:00');
+            let gerouNovo = false;
+
+            // 2. Loop de abastecimento
+            // Se a última data da agenda for menor que os 60 dias no futuro, ele fabrica novos agendamentos
+            while (dataUltima < limiteFuturo) {
+                // Dá o salto de X dias configurado (Ex: +15 dias)
+                dataUltima.setDate(dataUltima.getDate() + config.intervaloDias);
+                
+                // Se o salto passou do nosso limite, para o loop
+                if (dataUltima > limiteFuturo) break;
+
+                const ano = dataUltima.getFullYear();
+                const mes = (dataUltima.getMonth() + 1).toString().padStart(2, '0');
+                const dia = dataUltima.getDate().toString().padStart(2, '0');
+                const dataAgendamentoSql = `${ano}-${mes}-${dia}`;
+
+                // 3. Fabrica o agendamento "Filho"
+                const novoAgRef = db.collection('agendamentos').doc();
+                batch.set(novoAgRef, {
+                    recorrenciaId: doc.id,
+                    barbeiroUid: config.barbeiroUid,
+                    barbeiroNome: config.barbeiroNome,
+                    donoUid: config.donoUid,
+                    clienteUid: config.clienteUid,
+                    clienteNome: config.clienteNome + ' 🔁',
+                    clienteTelefone: config.clienteTelefone || '',
+                    servico: config.servico,
+                    valor: config.valor || 0,
+                    valorOriginal: config.valor || 0,
+                    data: dataAgendamentoSql,
+                    horario: config.horario,
+                    duracao: config.duracao || 30,
+                    status: 'confirmado',
+                    origem: 'recorrencia_auto',
+                    ts: admin.firestore.FieldValue.serverTimestamp(),
+                    lembreteConcluirEnviado: false,
+                    clienteNotificado: false
+                });
+
+                gerouNovo = true;
+                totalGerados++;
+                config.ultimaDataGerada = dataAgendamentoSql; // Atualiza a memória para o próximo salto
+            }
+
+            // 4. Se a fábrica trabalhou, atualiza a data na "Mãe"
+            if (gerouNovo) {
+                batch.update(doc.ref, {
+                    ultimaDataGerada: config.ultimaDataGerada,
+                    atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
+                });
+                totalConfiguracoesAtualizadas++;
+            }
+        });
+
+        // 5. Salva tudo de uma vezada só no Firestore (Alta performance)
+        if (totalGerados > 0) {
+            await batch.commit();
+            console.log(`[CRON RECORRÊNCIA] Sucesso! ${totalGerados} agendamentos gerados em ${totalConfiguracoesAtualizadas} recorrências.`);
+            res.status(200).send(`OK: Foram gerados ${totalGerados} novos agendamentos para manter a agenda cheia.`);
+        } else {
+            console.log("[CRON RECORRÊNCIA] Tudo em dia. Nenhum agendamento novo necessário.");
+            res.status(200).send("OK: Agenda já está preenchida até o limite. Nenhum novo agendamento gerado.");
+        }
+
+    } catch (error) {
+        console.error("[CRON RECORRÊNCIA] Erro:", error);
+        res.status(500).send("Erro no processamento: " + error.message);
+    }
+});
+
+// ==================================================================
 // FIM DA ROTA DE CRON
 // ==================================================================
 
