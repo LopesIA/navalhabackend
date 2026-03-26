@@ -925,7 +925,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
     console.log("[CRON] Iniciando ciclo de notificações (Push + WhatsApp)...");
 
-    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
+    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP (COM CORREÇÃO AUTOMÁTICA DE NÚMERO)
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
@@ -935,13 +935,19 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
+            // 1. Limpa o número tirando espaços, traços e parênteses
             numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+            
+            // 2. 🛡️ TRAVA DO 55 (BRASIL): Se não começar com 55 e for um número válido (mínimo 10 dígitos: DDD + Número), adiciona o 55!
+            if (!numeroLimpo.startsWith('55') && numeroLimpo.length >= 10) {
+                numeroLimpo = '55' + numeroLimpo;
+                console.log(`[CRON ZAP] Número corrigido automaticamente para: ${numeroLimpo}`);
+            }
         }
         
         const body = { number: numeroLimpo, text: texto };
         
         try {
-            // 🔥 MUDANÇA AQUI: checkNumber=false na URL para não travar a API
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
             const r = await fetch(urlEvo, {
                 method: 'POST',
