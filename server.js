@@ -2745,7 +2745,6 @@ const API_KEY_EVO = "Ja997640401";
             };
 
             await enviarMensagem(numeroRemetente);
-        }
         
     } catch (error) {
         console.error("Erro no Webhook:", error);
