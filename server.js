@@ -312,51 +312,46 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
             return res.status(200).json({ message: "Nenhum dispositivo registrado.", successCount: 0, failureCount: 0 });
         }
 
-        let totalSuccessCount = 0;
-        let totalFailureCount = 0;
-        const tokensToRemove = [];
+        const message = {
+            notification: { title, body },
+            data: { link: '/' }
+        };
 
-        console.log(`[MASSA] Iniciando envio UM POR UM para ${uniqueTokens.length} dispositivos...`);
-
-        // 🚀 MUDANÇA AQUI: Loop que envia rigorosamente UM DE CADA VEZ
-        for (const token of uniqueTokens) {
-            try {
-                await admin.messaging().send({
-                    token: token,
-                    notification: { title, body },
-                    data: { link: '/' }
-                });
-                totalSuccessCount++;
-                
-                // Delay de 50ms (respiro para o servidor não ser bloqueado por spam)
-                await new Promise(resolve => setTimeout(resolve, 50)); 
-            } catch (error) {
-                totalFailureCount++;
-                const errCode = error.code || error.errorInfo?.code;
-                
-                if (errCode === 'messaging/invalid-registration-token' || errCode === 'messaging/registration-token-not-registered') {
-                    tokensToRemove.push(token);
-                }
-            }
+        const tokenChunks = [];
+        for (let i = 0; i < uniqueTokens.length; i += 500) {
+            tokenChunks.push(uniqueTokens.slice(i, i + 500));
         }
 
-        // Limpeza de tokens inválidos (fantasmas)
-        if (tokensToRemove.length > 0) {
-            console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
-            // Limpa de 500 em 500 para não estourar o limite do Firestore (in operator)
-            for (let i = 0; i < tokensToRemove.length; i += 500) {
-                const chunk = tokensToRemove.slice(i, i + 500);
-                const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', chunk).get();
+        let totalSuccessCount = 0;
+        let totalFailureCount = 0;
+
+        for (const chunk of tokenChunks) {
+            const response = await admin.messaging().sendEachForMulticast({ ...message, tokens: chunk });
+            totalSuccessCount += response.successCount;
+            totalFailureCount += response.failureCount;
+
+            const tokensToRemove = [];
+            response.responses.forEach((result, index) => {
+                const error = result.error?.code;
+                if (error === 'messaging/invalid-registration-token' || error === 'messaging/registration-token-not-registered') {
+                    tokensToRemove.push(chunk[index]);
+                }
+            });
+
+            if (tokensToRemove.length > 0) {
+                console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
+                const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', tokensToRemove).get();
                 const batch = db.batch();
                 usersToUpdate.forEach(userDoc => {
-                    batch.update(userDoc.ref, { fcmTokens: admin.firestore.FieldValue.arrayRemove(...chunk) });
+                    const ref = userDoc.ref;
+                    batch.update(ref, { fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove) });
                 });
                 await batch.commit();
             }
         }
 
         res.status(200).json({
-            message: "Operação de envio individual concluída.",
+            message: "Operação de envio em massa concluída.",
             successCount: totalSuccessCount,
             failureCount: totalFailureCount,
         });
@@ -931,7 +926,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     console.log("[CRON] Iniciando ciclo de notificações (Push + WhatsApp)...");
 
     // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
-    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP (UM DE CADA VEZ COM ESPERA)
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
@@ -947,6 +941,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         const body = { number: numeroLimpo, text: texto };
         
         try {
+            // 🔥 MUDANÇA AQUI: checkNumber=false na URL para não travar a API
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
             const r = await fetch(urlEvo, {
                 method: 'POST',
@@ -954,10 +949,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 body: JSON.stringify(body)
             });
             if (!r.ok) console.error("[CRON ZAP] Erro na Evolution:", await r.text());
-            
-            // ⏳ A MÁGICA AQUI: Obriga o Node a esperar 1 segundo inteiro antes de mandar a próxima mensagem de WhatsApp
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
         } catch (e) {
             console.error("[CRON ZAP] Erro no fetch:", e.message);
         }
@@ -1039,7 +1030,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const usuariosSumidos = await db.collection('usuarios')
                 .where('tipo', '==', 'cliente')
                 .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(50) 
+                .limit(1) 
                 .get();
 
             for (const doc of usuariosSumidos.docs) {
@@ -1201,40 +1192,18 @@ app.post('/api/disparar-sos', async (req, res) => {
             }
         };
 
-        const message = {
-            notification: {
-                title: `🚨 SOS: ${desconto}% OFF!`,
-                body: `${nomeProfissional} liberou uma vaga agora! ${mensagem}`
-            },
-            data: {
-                link: '#barbeiros', 
-                forceAlarm: 'true'  
-            }
-        };
+        // 3. Envia em Lotes (Multicast)
+        const response = await admin.messaging().sendEachForMulticast({
+            ...message,
+            tokens: uniqueTokens
+        });
 
-        // 3. Envia UM POR UM (Substituindo o Multicast)
-        let successCount = 0;
-        console.log(`[SOS] Enviando alertas UM POR UM para ${uniqueTokens.length} clientes...`);
-
-        for (const token of uniqueTokens) {
-            try {
-                await admin.messaging().send({
-                    token: token,
-                    ...message
-                });
-                successCount++;
-                
-                // Delay de 50ms para garantir estabilidade
-                await new Promise(resolve => setTimeout(resolve, 50)); 
-            } catch (error) {
-                console.warn(`[SOS] Falha ao enviar para o token (ignorando):`, error.message);
-            }
-        }
+        console.log(`[SOS] Enviado para ${uniqueTokens.length} dispositivos próximos.`);
 
         res.status(200).json({ 
             success: true, 
             message: `Alerta enviado para ${countUsuariosProximos} clientes próximos!`,
-            sendedCount: successCount 
+            sendedCount: response.successCount 
         });
 
     } catch (error) {
