@@ -941,6 +941,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         const body = { number: numeroLimpo, text: texto };
         
         try {
+            // 🔥 MUDANÇA AQUI: checkNumber=false na URL para não travar a API
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
             const r = await fetch(urlEvo, {
                 method: 'POST',
@@ -1026,44 +1027,77 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         } // Fim do Loop Ilimitado de Lembretes
 
         // =====================================================================
-        // 2. RETENÇÃO: CLIENTES SUMIDOS (TRAVADO EM 1 POR VEZ)
+        // 2. RETENÇÃO: CLIENTES SUMIDOS (TRAVADO EM 1 POR VEZ - BUSCA EM AGENDAMENTOS)
         // =====================================================================
+        // Executa só na janela das 10:00 da manhã
         if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
             const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
-            // Puxamos alguns só para ter margem de busca
-            const usuariosSumidos = await db.collection('usuarios')
-                .where('tipo', '==', 'cliente')
-                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
+            // 1. Busca os agendamentos antigos usando o campo "ts"
+            // Puxamos um lote de 50 para procurar o primeiro válido
+            const agendamentosAntigos = await db.collection('agendamentos')
+                .where('ts', '<=', admin.firestore.Timestamp.fromDate(vinteCincoDiasAtras))
                 .limit(50) 
                 .get();
 
-            for (const doc of usuariosSumidos.docs) {
-                const uData = doc.data();
+            for (const doc of agendamentosAntigos.docs) {
+                const ag = doc.data();
 
-                // Se o cliente já recebeu o aviso de sumido, pula e vai pro próximo da fila
-                if (uData.lembreteAusenciaEnviado) continue;
-
-                console.log(`[CRON] Disparando RETENÇÃO para cliente ausente: ${uData.nome}`);
-
-                sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
-                
-                if (uData.telefone) {
-                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
-                    await enviarWhatsAppCron(uData.telefone, msgZap);
+                // Ignora se for cliente de balcão (sem App) ou se não tiver o ID
+                if (!ag.clienteUid || ag.clienteUid.startsWith('manual_')) {
+                    continue;
                 }
 
-                // Marca no banco para ele não receber de novo nas próximas rodadas do CRON
+                // Pula se JÁ ENVIAMOS um lembrete para esse agendamento velho
+                if (ag.lembreteAusenciaEnviado) {
+                    continue;
+                }
+
+                // 2. 🛡️ VALIDAÇÃO DE SEGURANÇA (O CLIENTE VOLTOU DEPOIS DISSO?)
+                // Buscamos todos os agendamentos desse cliente para conferir se há algum recente.
+                const agendamentosDoCliente = await db.collection('agendamentos')
+                    .where('clienteUid', '==', ag.clienteUid)
+                    .get();
+
+                let temAgendamentoRecente = false;
+
+                agendamentosDoCliente.forEach(docCli => {
+                    const dadosCli = docCli.data();
+                    const dataTS = dadosCli.ts ? dadosCli.ts.toDate() : new Date(0);
+                    // Se acharmos QUALQUER agendamento dele feito nos últimos 25 dias, ele não está sumido!
+                    if (dataTS > vinteCincoDiasAtras) {
+                        temAgendamentoRecente = true;
+                    }
+                });
+
+                // Se ele não sumiu de verdade, ou se esse serviço velho não foi concluído
+                if (temAgendamentoRecente || (ag.status !== 'concluido' && ag.status !== 'avaliado')) {
+                    // Marcamos como "enviado" só pra tirar ele da fila de pesquisa
+                    batch.update(doc.ref, { lembreteAusenciaEnviado: true }); 
+                    continue; 
+                }
+
+                // 3. 🎯 ACHOU O PRIMEIRO CLIENTE REALMENTE SUMIDO! Envia a notificação:
+                console.log(`[CRON] Disparando RETENÇÃO para cliente ausente: ${ag.clienteNome}`);
+                sendNotification(ag.clienteUid, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+                
+                if (ag.clienteTelefone) {
+                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
+                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+                }
+
+                // 4. Marca este agendamento antigo como avisado para ele sair da fila
                 batch.update(doc.ref, { lembreteAusenciaEnviado: true });
                 contadorRetencao++;
-
-                // 🔥 A MÁGICA ABSOLUTA AQUI: Interrompe o Loop! 
-                // Ele manda pra 1 pessoa e mata a execução desta parte!
+                
+                // 5. 🔥 A MÁGICA: Quebra o loop IMEDIATAMENTE! Garante que só envia 1 por vez. 🔥
                 break; 
             }
         }
 
-        // Envia tudo para o banco
+        // =====================================================================
+        // SALVA TUDO NO BANCO E RETORNA
+        // =====================================================================
         await batch.commit();
         res.status(200).send(`OK: Varredura concluída. Lembretes de Agenda: ${contadorLembretes} | Clientes Retidos: ${contadorRetencao}`);
 
