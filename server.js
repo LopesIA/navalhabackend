@@ -1034,10 +1034,9 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
             // 1. Busca os agendamentos antigos usando o campo "ts"
-            // Puxamos um lote de 50 para procurar o primeiro válido
+            // 🔥 MUDANÇA AQUI: Removido o .limit(50)! Agora ele olha tudo até achar 1 válido.
             const agendamentosAntigos = await db.collection('agendamentos')
                 .where('ts', '<=', admin.firestore.Timestamp.fromDate(vinteCincoDiasAtras))
-                .limit(50) 
                 .get();
 
             for (const doc of agendamentosAntigos.docs) {
@@ -1054,7 +1053,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 }
 
                 // 2. 🛡️ VALIDAÇÃO DE SEGURANÇA (O CLIENTE VOLTOU DEPOIS DISSO?)
-                // Buscamos todos os agendamentos desse cliente para conferir se há algum recente.
                 const agendamentosDoCliente = await db.collection('agendamentos')
                     .where('clienteUid', '==', ag.clienteUid)
                     .get();
