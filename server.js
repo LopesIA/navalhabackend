@@ -1597,130 +1597,114 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     try {
         const data = req.body;
         
+        // 1️⃣ A CORREÇÃO DE OURO: Verifica o TIPO do evento ANTES da trava!
+        const evento = data.event || data.event_type;
         
+        // Se NÃO for uma nova mensagem chegando (ex: for evento de "mensagem entregue"), ignora!
+        if (evento !== "messages.upsert" && evento !== "MESSAGES_UPSERT") {
+            return res.status(200).send('IGNORED_EVENT');
+        }
 
-        // --- 🛡️ BLINDAGEM ABSOLUTA CONTRA DUPLICATAS ---
-        // Pega o ID em todas as posições possíveis da Evolution
+        // --- 🛡️ BLINDAGEM ABSOLUTA CONTRA DUPLICATAS (AGORA NO LUGAR CERTO) ---
         const msgId = data.data?.key?.id || data.data?.id || data.data?.messageId;
         const textoTrava = data.data?.message?.conversation || data.data?.message?.extendedTextMessage?.text || "sem_texto";
         const remetenteTrava = data.data?.key?.remoteJid || "desconhecido";
         
-        // Se não vier ID nenhum, criamos um ID único com base em quem mandou e o que escreveu
         const idTrava = msgId || `${remetenteTrava}-${textoTrava.substring(0, 15)}`;
 
-        // Se esse ID já bateu aqui nos últimos 15 segundos, bloqueia na hora!
         if (idTrava && mensagensProcessadas.has(idTrava)) {
             console.log(`[TRAVA ATIVADA] Mensagem duplicada ignorada: ${idTrava}`);
             return res.status(200).send('DUPLICATE_IGNORED');
         }
 
-        // Responde a Evolution imediatamente para ela parar de mandar
+        // Responde a Evolution imediatamente para ela não travar e não reenviar a mesma mensagem
         res.status(200).send('EVENT_RECEIVED');
 
         if (idTrava) {
             mensagensProcessadas.add(idTrava);
-            // Aumentei o tempo de trava para 15 segundos para dar tempo do Gemini responder tranquilo
             setTimeout(() => mensagensProcessadas.delete(idTrava), 15000); 
         }
         // ------------------------------------------------
 
-        const evento = data.event;
         const nomeDaInstancia = data.instance || "KingAgenda"; 
+        const mensagem = data.data.message;
+        const key = data.data.key || {};
+        let numeroRemetente = key.remoteJid;
+        const fromMe = key.fromMe;
 
-        if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
-            const mensagem = data.data.message;
-            const key = data.data.key || {};
-            let numeroRemetente = key.remoteJid;
-            const fromMe = key.fromMe;
+        // 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS
+        if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) {
+            return;
+        }
 
-            // 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS
-            if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) {
-                return res.status(200).send("Ignorado");
-            }
-
-            // =========================================================
-            // 🕵️‍♂️ MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
-            // =========================================================
-            if (numeroRemetente && numeroRemetente.includes('@lid')) {
-                const nomeWhatsapp = data.data?.pushName;
-                
-                if (nomeWhatsapp) {
-                    console.log(`[ZAP] 👻 Fantasma detectado! Nome: ${nomeWhatsapp}. Vasculhando o banco de dados...`);
-                    
-                    try {
-                        let usuariosEncontrados = [];
-                        const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                        
-                        // Varre os usuários para achar de quem é esse nome
-                        const allUsers = await db.collection('usuarios').get();
-                        allUsers.forEach(doc => {
-                            const u = doc.data();
-                            if (u.telefone && u.nome) {
-                                const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
-                                    usuariosEncontrados.push(u.telefone);
-                                }
-                            }
-                        });
-
-                        // SÓ APLICA A MÁGICA SE ACHAR EXATAMENTE 1 PESSOA!
-                        if (usuariosEncontrados.length === 1) {
-                            let numeroRealEncontrado = usuariosEncontrados[0];
-                            
-                            // 🔧 CORREÇÃO DO DDD: Limpa traços/espaços e adiciona o 55 do Brasil se faltar!
-                            numeroRealEncontrado = numeroRealEncontrado.replace(/[^0-9]/g, ''); 
-                            if (!numeroRealEncontrado.startsWith('55')) {
-                                numeroRealEncontrado = '55' + numeroRealEncontrado;
-                            }
-
-                            numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
-                            
-                            console.log(`[ZAP] 🎯 BINGO! Único cliente encontrado. O número real de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
-                            numeroRemetente = numeroRealEncontrado; // O Milagre acontece!
-                            
-                        } else if (usuariosEncontrados.length > 1) {
-                            // TEM DOIS ARLAN! O bot desiste de adivinhar e atende ele como "Desconhecido" pelo @lid
-                            console.log(`[ZAP] ⚠️ Mais de um cliente encontrado com o nome '${nomeWhatsapp}'. Impossível adivinhar qual é.`);
-                            // Ele vai manter o @lid e o Gemini vai perguntar o nome/número dele na conversa.
-                            
-                        } else {
-                            // NÃO ACHOU NINGUÉM! É um cliente 100% novo que veio pelo link oculto.
-                            console.log(`[ZAP] ❌ Cliente '${nomeWhatsapp}' não tem cadastro prévio. Mantendo @lid.`);
-                        }
-                    } catch (e) {
-                        console.log(`[ZAP] Erro na Máquina de Descoberta:`, e.message);
-                    }
-                }
-            }
-            // =========================================================
-
-if (numeroRemetente && numeroRemetente.includes('@lid')) {
-                console.log(`[ZAP] 🛑 Atendimento por IA abortado. A Evolution não permite envios para @lid. Aguardando interação com número real.`);
-                if (!res.headersSent) {
-                    return res.status(200).send("LID_BLOCKED_TO_SAVE_RESOURCES");
-                }
-                return;
-            }
-
-            // FIX MIKAELA
-            if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-                numeroRemetente = "5527996598623@s.whatsapp.net"; 
-            }
-
-            const textoRecebido =
-                mensagem.conversation ||
-                mensagem.extendedTextMessage?.text ||
-                mensagem.imageMessage?.caption || "";
-
-            if (!textoRecebido || fromMe) return; 
-
-            console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
+        // =========================================================
+        // 🕵️‍♂️ MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
+        // =========================================================
+        if (numeroRemetente && numeroRemetente.includes('@lid')) {
+            const nomeWhatsapp = data.data?.pushName;
             
-            // 🛡️ TRATAMENTO DE SEGURANÇA PARA @LID (Contas Business)
-            let remoteJidLimpo = numeroRemetente.split('@')[0];
-            if (numeroRemetente.includes('@lid')) {
-                remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro para não perder o contato
+            if (nomeWhatsapp) {
+                console.log(`[ZAP] 👻 Fantasma detectado! Nome: ${nomeWhatsapp}. Vasculhando banco...`);
+                
+                try {
+                    let usuariosEncontrados = [];
+                    const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                    
+                    const allUsers = await db.collection('usuarios').get();
+                    allUsers.forEach(doc => {
+                        const u = doc.data();
+                        if (u.telefone && u.nome) {
+                            const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                            if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
+                                usuariosEncontrados.push(u.telefone);
+                            }
+                        }
+                    });
+
+                    if (usuariosEncontrados.length === 1) {
+                        let numeroRealEncontrado = usuariosEncontrados[0];
+                        numeroRealEncontrado = numeroRealEncontrado.replace(/[^0-9]/g, ''); 
+                        if (!numeroRealEncontrado.startsWith('55')) {
+                            numeroRealEncontrado = '55' + numeroRealEncontrado;
+                        }
+                        numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+                        
+                        console.log(`[ZAP] 🎯 O número real de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
+                        numeroRemetente = numeroRealEncontrado; 
+                    } else {
+                        console.log(`[ZAP] ⚠️ Cliente '${nomeWhatsapp}' não descoberto. Mantendo @lid.`);
+                    }
+                } catch (e) {
+                    console.log(`[ZAP] Erro na Descoberta:`, e.message);
+                }
             }
+        }
+        // =========================================================
+
+        // 🔥 A SEGUNDA CORREÇÃO DE OURO ESTÁ AQUI 🔥
+        // Apagamos aquele IF antigo que matava o processo caso fosse @lid. 
+        // Agora, se o número for @lid e a máquina não descobrir de quem é, 
+        // a IA VAI RESPONDER mesmo assim usando o checkNumber=false na Evolution!
+
+        // FIX MIKAELA
+        if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
+            numeroRemetente = "5527996598623@s.whatsapp.net"; 
+        }
+
+        const textoRecebido =
+            mensagem.conversation ||
+            mensagem.extendedTextMessage?.text ||
+            mensagem.imageMessage?.caption || "";
+
+        if (!textoRecebido || fromMe) return; 
+
+        console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
+        
+        // 🛡️ TRATAMENTO DE SEGURANÇA PARA @LID NO BANCO DE DADOS
+        let remoteJidLimpo = numeroRemetente.split('@')[0];
+        if (numeroRemetente.includes('@lid')) {
+            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico para a IA lembrar
+        }
 
             // ============================================================
             // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA
