@@ -1027,22 +1027,36 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
             const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
+            // Puxa um pequeno lote para ter margem de busca
             const usuariosSumidos = await db.collection('usuarios')
                 .where('tipo', '==', 'cliente')
                 .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(1) 
+                .limit(50) 
                 .get();
 
             for (const doc of usuariosSumidos.docs) {
                 const uData = doc.data();
+
+                // 1. Se já recebeu, pula e vai verificar o próximo da fila
+                if (uData.lembreteAusenciaEnviado) continue;
+
+                // 2. ACHOU O PRIMEIRO QUE NÃO RECEBEU! Envia a notificação:
                 sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+                
                 if (uData.telefone) {
                     const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
                     await enviarWhatsAppCron(uData.telefone, msgZap);
                 }
+
+                // 3. Marca no banco para ele não receber de novo amanhã
+                batch.update(doc.ref, { lembreteAusenciaEnviado: true });
+                
+                // 4. 🔥 A MÁGICA: Quebra o loop IMEDIATAMENTE! Garante que só envia 1 por vez. 🔥
+                break; 
             }
         }
 
+        // Salva tudo no banco de uma vez
         await batch.commit();
         res.status(200).send(`OK: Varredura concluída com sucesso. Envios feitos: ${contador}`);
 
