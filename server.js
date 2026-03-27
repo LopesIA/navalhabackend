@@ -914,18 +914,17 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (MOTOR MATEMÁTICO DE JANELA DE TEMPO) ---
+// --- CRON JOB ATUALIZADO (LEMBRETES COMPLETOS + RETENÇÃO 1 A 1 + CLIENTE MANUAL) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
-    // Verificação de segurança
     if (key !== process.env.CRON_SECRET_KEY && key !== "Ja997640401") {
         return res.status(401).send('Unauthorized');
     }
 
     console.log("[CRON] Iniciando ciclo de notificações (Push + WhatsApp)...");
 
-    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
+    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP (COM BLINDAGEM DO 55)
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
@@ -935,27 +934,34 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
-            numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
+            numeroLimpo = destino.replace(/[^0-9]/g, ''); // Tira traços e espaços
+            // Adiciona o 55 se o número tiver apenas 10 ou 11 dígitos
+            if (numeroLimpo.length === 10 || numeroLimpo.length === 11) {
+                numeroLimpo = '55' + numeroLimpo;
+            }
         }
         
         const body = { number: numeroLimpo, text: texto };
         
         try {
-            // 🔥 MUDANÇA AQUI: checkNumber=false na URL para não travar a API
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
             const r = await fetch(urlEvo, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                 body: JSON.stringify(body)
             });
-            if (!r.ok) console.error("[CRON ZAP] Erro na Evolution:", await r.text());
+            if (!r.ok) console.error(`[CRON ZAP] Erro Evo (${numeroLimpo}):`, await r.text());
+            await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) {
             console.error("[CRON ZAP] Erro no fetch:", e.message);
         }
     };
 
-    // Força a data para o fuso de São Paulo
+    // --- MÁQUINA DO TEMPO (DATAS) ---
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+    
+    const amanhaBrasil = new Date(agoraBrasil); amanhaBrasil.setDate(amanhaBrasil.getDate() + 1);
+    const cincoDiasBrasil = new Date(agoraBrasil); cincoDiasBrasil.setDate(cincoDiasBrasil.getDate() + 5);
 
     const formatDateIso = (d) => {
         const year = d.getFullYear();
@@ -965,86 +971,185 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     };
 
     const dataHoje = formatDateIso(agoraBrasil);
+    const dataAmanha = formatDateIso(amanhaBrasil);
+    const data5Dias = formatDateIso(cincoDiasBrasil);
+    
     const batch = db.batch();
-    let contador = 0;
+    let contadorLembretes = 0; 
+    let contadorRetencao = 0;  
 
     try {
-        console.log(`[CRON] Buscando agendamentos para o dia de hoje: ${dataHoje}`);
+        const baseQuery = db.collection('agendamentos').where('status', 'in', ['confirmado', 'conclusão pendente']);
 
-        // 1. Busca TODOS os agendamentos confirmados DO DIA (Muito mais seguro)
-        const snapHoje = await db.collection('agendamentos')
-            .where('data', '==', dataHoje)
-            .where('status', 'in', ['confirmado', 'conclusão pendente'])
-            .get();
+        // =====================================================================
+        // 1. LEMBRETES DE 5 DIAS ANTES
+        // =====================================================================
+        const snap5Dias = await baseQuery.where('data', '==', data5Dias).get();
+        for (const doc of snap5Dias.docs) {
+            const ag = doc.data();
+            if (!ag.lembrete5diasEnviado) {
+                console.log(`[CRON] Disparando 5 DIAS para ${ag.clienteNome}`);
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '📅 Falta pouco!', `Faltam 5 dias para o seu horário com ${ag.barbeiroNome}.`, { link: '#historico' });
+                if (ag.clienteTelefone) {
+                    await enviarWhatsAppCron(ag.clienteTelefone, `📅 *Faltam 5 dias!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para avisar que o seu agendamento de *${ag.servico}* com *${ag.barbeiroNome}* será no dia ${ag.data.split('-').reverse().join('/')} às ${ag.horario}.\nJá estamos nos preparando para te receber! ✂️`);
+                }
+                batch.update(doc.ref, { lembrete5diasEnviado: true });
+                contadorLembretes++;
+            }
+        }
 
+        // =====================================================================
+        // 2. LEMBRETES DE 1 DIA ANTES (AMANHÃ)
+        // =====================================================================
+        const snapAmanha = await baseQuery.where('data', '==', dataAmanha).get();
+        for (const doc of snapAmanha.docs) {
+            const ag = doc.data();
+            if (!ag.lembrete1diaEnviado) {
+                console.log(`[CRON] Disparando 1 DIA para ${ag.clienteNome}`);
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ É amanhã!', `Seu horário com ${ag.barbeiroNome} é amanhã às ${ag.horario}.`, { link: '#historico' });
+                if (ag.clienteTelefone) {
+                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *É amanhã!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nLembrando que o seu horário com *${ag.barbeiroNome}* é amanhã às ${ag.horario}.\nSe precisar reagendar, por favor nos avise pelo app! 💈`);
+                }
+                batch.update(doc.ref, { lembrete1diaEnviado: true });
+                contadorLembretes++;
+            }
+        }
+
+        // =====================================================================
+        // 3. LEMBRETES DE HOJE (1 HORA, 20 MIN E AGRADECIMENTO)
+        // =====================================================================
+        const snapHoje = await baseQuery.where('data', '==', dataHoje).get();
         for (const doc of snapHoje.docs) {
             const ag = doc.data();
-            if (!ag.horario) continue; // Pula se houver erro no banco
+            if (!ag.horario) continue; 
 
-            // Transforma o "15:30" do banco em uma Data real para calcular os minutos
             const [horas, minutos] = ag.horario.split(':').map(Number);
             const horaAgendamento = new Date(agoraBrasil);
             horaAgendamento.setHours(horas, minutos, 0, 0);
 
-            // Calcula a diferença exata em MINUTOS entre AGORA e o AGENDAMENTO
-            const diffMs = horaAgendamento.getTime() - agoraBrasil.getTime();
-            const minutosFaltando = Math.floor(diffMs / 60000);
+            // Calcula minutos (Positivo = Futuro | Negativo = Passado)
+            const minutosFaltando = Math.floor((horaAgendamento.getTime() - agoraBrasil.getTime()) / 60000);
 
-            // === A. LEMBRETE DE 1 HORA (Janela entre 45 e 65 minutos) ===
-            // Assim, se o Cron bater aos 58 minutos ou 47 minutos, ele pega do mesmo jeito!
+            // A. LEMBRETE DE 1 HORA (Entre 45 e 65 min antes)
             if (minutosFaltando <= 65 && minutosFaltando >= 45 && !ag.lembrete1hEnviado) {
-                console.log(`[CRON] Disparando 1H para ${ag.clienteNome} (${ag.horario})`);
-                
-                sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
-                
+                console.log(`[CRON] Disparando 1H para ${ag.clienteNome}`);
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    const msgZap = `⏰ *Lembrete King Agenda*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para lembrar que o seu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\n\nTe esperamos lá! ✂️`;
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *Falta 1 Hora!*\n\nOlá, ${ag.clienteNome}!\nSeu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\nTe esperamos lá! ✂️`);
                 }
-
                 batch.update(doc.ref, { lembrete1hEnviado: true });
-                contador++;
+                contadorLembretes++;
             }
 
-            // === B. LEMBRETE DE 20 MINUTOS (Janela entre 5 e 25 minutos) ===
-            else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado && !ag.lembrete10minEnviado) {
-                console.log(`[CRON] Disparando 20MIN para ${ag.clienteNome} (${ag.horario})`);
-                
-                sendNotification(ag.clienteUid, '🚀 É daqui a pouco!', `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app.`, { link: '#historico' });
-                
+            // B. LEMBRETE DE 20 MINUTOS (Entre 5 e 25 min antes)
+            else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado) {
+                console.log(`[CRON] Disparando 20MIN para ${ag.clienteNome}`);
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '🚀 É daqui a pouco!', `Seu corte é em 20 minutos!`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    const msgZap = `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!\nCaso ocorra algum imprevisto, por favor nos avise.`;
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `🚀 *É daqui a pouco!*\n\n${ag.clienteNome}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!`);
                 }
-
                 batch.update(doc.ref, { lembrete20minEnviado: true, lembrete10minEnviado: true });
-                contador++;
+                contadorLembretes++;
             }
-        }
 
-        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) ===
-        // Executa só na janela das 10:00 da manhã
-        if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
-            const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
-            
-            const usuariosSumidos = await db.collection('usuarios')
-                .where('tipo', '==', 'cliente')
-                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(50) 
-                .get();
-
-            for (const doc of usuariosSumidos.docs) {
-                const uData = doc.data();
-                sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
-                if (uData.telefone) {
-                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
-                    await enviarWhatsAppCron(uData.telefone, msgZap);
+            // C. AGRADECIMENTO (Entre 30 e 60 min DEPOIS do horário marcado)
+            else if (minutosFaltando <= -30 && minutosFaltando >= -60 && !ag.agradecimentoEnviado) {
+                console.log(`[CRON] Disparando AGRADECIMENTO para ${ag.clienteNome}`);
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do ${ag.barbeiroNome}?`, { link: '#historico' });
+                if (ag.clienteTelefone) {
+                    await enviarWhatsAppCron(ag.clienteTelefone, `⭐ *Muito obrigado!*\n\nFala, ${ag.clienteNome}! Passando para agradecer pela preferência hoje com o *${ag.barbeiroNome}*.\nSe puder, deixe uma avaliação pra gente no App, isso nos ajuda muito! Tamo junto! 🤝`);
                 }
+                batch.update(doc.ref, { agradecimentoEnviado: true });
+                contadorLembretes++;
             }
+        } 
+
+        // =====================================================================
+        // 4. RETENÇÃO: CLIENTES SUMIDOS (ENTRE 25 E 70 DIAS) - 1 POR VEZ!
+        // =====================================================================
+        const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
+        const setentaDiasAtras = new Date(agoraBrasil.getTime() - 70 * 24 * 60 * 60 * 1000);
+        
+        const agendamentosAntigos = await db.collection('agendamentos')
+            .where('ts', '<=', admin.firestore.Timestamp.fromDate(vinteCincoDiasAtras))
+            .where('ts', '>=', admin.firestore.Timestamp.fromDate(setentaDiasAtras))
+            .limit(100) 
+            .get();
+
+        const telefonesAnalisados = new Set();
+        const uidsAnalisados = new Set();
+
+        for (const doc of agendamentosAntigos.docs) {
+            const ag = doc.data();
+
+            // Pula se já enviamos lembrete de ausência para esse agendamento
+            if (ag.lembreteAusenciaEnviado) continue;
+
+            const isManual = !ag.clienteUid || ag.clienteUid.startsWith('manual_');
+
+            // Se for manual e não tiver telefone, não tem como enviar Zap nem checar retorno, então pula e mata o doc.
+            if (isManual && !ag.clienteTelefone) {
+                batch.update(doc.ref, { lembreteAusenciaEnviado: true });
+                continue;
+            }
+
+            // Controle para não mandar 2x pro mesmo cliente no mesmo loop
+            if (isManual) {
+                if (telefonesAnalisados.has(ag.clienteTelefone)) continue;
+                telefonesAnalisados.add(ag.clienteTelefone);
+            } else {
+                if (uidsAnalisados.has(ag.clienteUid)) continue;
+                uidsAnalisados.add(ag.clienteUid);
+            }
+
+            // 🛡️ VALIDAÇÃO DE SEGURANÇA: Voltou nos últimos 25 dias?
+            let queryRecente;
+            if (isManual) {
+                queryRecente = db.collection('agendamentos').where('clienteTelefone', '==', ag.clienteTelefone);
+            } else {
+                queryRecente = db.collection('agendamentos').where('clienteUid', '==', ag.clienteUid);
+            }
+
+            const agendamentosDoCliente = await queryRecente.get();
+            let temAgendamentoRecente = false;
+
+            agendamentosDoCliente.forEach(docCli => {
+                const ts = docCli.data().ts;
+                const dataTS = ts ? ts.toDate() : new Date(0);
+                if (dataTS > vinteCincoDiasAtras) {
+                    temAgendamentoRecente = true;
+                }
+            });
+
+            // Se ele tem agendamento recente, ou o serviço velho não for concluído/avaliado:
+            if (temAgendamentoRecente || (ag.status !== 'concluido' && ag.status !== 'avaliado')) {
+                batch.update(doc.ref, { lembreteAusenciaEnviado: true }); 
+                continue; 
+            }
+
+            // 🎯 ACHOU UM CLIENTE SUMIDO VÁLIDO! Envia a mensagem:
+            console.log(`[CRON] Disparando RETENÇÃO para: ${ag.clienteNome}`);
+            
+            // Só manda Push se tiver App
+            if (!isManual) {
+                sendNotification(ag.clienteUid, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+            }
+            
+            // Manda o ZAP (pra App ou Manual)
+            if (ag.clienteTelefone) {
+                const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
+                await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+            }
+
+            batch.update(doc.ref, { lembreteAusenciaEnviado: true });
+            contadorRetencao++;
+            
+            // 🔥 QUEBRA O LOOP IMEDIATAMENTE (ENVIA SÓ PRA 1)!
+            break; 
         }
 
         await batch.commit();
-        res.status(200).send(`OK: Varredura concluída com sucesso. Envios feitos: ${contador}`);
+        res.status(200).send(`OK: Lembretes: ${contadorLembretes} | Retenção (1 a 1): ${contadorRetencao}`);
 
     } catch (error) {
         console.error(error);
