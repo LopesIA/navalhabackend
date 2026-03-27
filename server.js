@@ -941,7 +941,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         const body = { number: numeroLimpo, text: texto };
         
         try {
-            // 🔥 MUDANÇA AQUI: checkNumber=false na URL para não travar a API
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
             const r = await fetch(urlEvo, {
                 method: 'POST',
@@ -949,6 +948,9 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 body: JSON.stringify(body)
             });
             if (!r.ok) console.error("[CRON ZAP] Erro na Evolution:", await r.text());
+            
+            // Delay seguro para a API da Evolution não travar
+            await new Promise(resolve => setTimeout(resolve, 1000));
         } catch (e) {
             console.error("[CRON ZAP] Erro no fetch:", e.message);
         }
@@ -966,12 +968,16 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
     const dataHoje = formatDateIso(agoraBrasil);
     const batch = db.batch();
-    let contador = 0;
+    
+    let contadorLembretes = 0; // Vai contar os lembretes de agenda
+    let contadorRetencao = 0;  // Vai contar os clientes sumidos (máx 1)
 
     try {
         console.log(`[CRON] Buscando agendamentos para o dia de hoje: ${dataHoje}`);
 
-        // 1. Busca TODOS os agendamentos confirmados DO DIA (Muito mais seguro)
+        // =====================================================================
+        // 1. LEMBRETES DE HORÁRIO (ILIMITADO - ENVIA PARA TODOS)
+        // =====================================================================
         const snapHoje = await db.collection('agendamentos')
             .where('data', '==', dataHoje)
             .where('status', 'in', ['confirmado', 'conclusão pendente'])
@@ -979,19 +985,16 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
         for (const doc of snapHoje.docs) {
             const ag = doc.data();
-            if (!ag.horario) continue; // Pula se houver erro no banco
+            if (!ag.horario) continue; 
 
-            // Transforma o "15:30" do banco em uma Data real para calcular os minutos
             const [horas, minutos] = ag.horario.split(':').map(Number);
             const horaAgendamento = new Date(agoraBrasil);
             horaAgendamento.setHours(horas, minutos, 0, 0);
 
-            // Calcula a diferença exata em MINUTOS entre AGORA e o AGENDAMENTO
             const diffMs = horaAgendamento.getTime() - agoraBrasil.getTime();
             const minutosFaltando = Math.floor(diffMs / 60000);
 
-            // === A. LEMBRETE DE 1 HORA (Janela entre 45 e 65 minutos) ===
-            // Assim, se o Cron bater aos 58 minutos ou 47 minutos, ele pega do mesmo jeito!
+            // A. LEMBRETE DE 1 HORA
             if (minutosFaltando <= 65 && minutosFaltando >= 45 && !ag.lembrete1hEnviado) {
                 console.log(`[CRON] Disparando 1H para ${ag.clienteNome} (${ag.horario})`);
                 
@@ -1003,10 +1006,10 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 }
 
                 batch.update(doc.ref, { lembrete1hEnviado: true });
-                contador++;
+                contadorLembretes++;
             }
 
-            // === B. LEMBRETE DE 20 MINUTOS (Janela entre 5 e 25 minutos) ===
+            // B. LEMBRETE DE 20 MINUTOS
             else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado && !ag.lembrete10minEnviado) {
                 console.log(`[CRON] Disparando 20MIN para ${ag.clienteNome} (${ag.horario})`);
                 
@@ -1018,33 +1021,66 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 }
 
                 batch.update(doc.ref, { lembrete20minEnviado: true, lembrete10minEnviado: true });
-                contador++;
+                contadorLembretes++;
             }
-        }
+        } // Fim do Loop de Lembretes
 
-        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) ===
-        // Executa só na janela das 10:00 da manhã
-        if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
-            const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
-            
-            const usuariosSumidos = await db.collection('usuarios')
-                .where('tipo', '==', 'cliente')
-                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
-                .limit(50) 
+        // =====================================================================
+        // 2. RETENÇÃO: CLIENTES SUMIDOS (TRAVADO EM 1 POR VEZ - A CADA BATIDA DO CRON)
+        // =====================================================================
+        const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
+        
+        // Busca agendamentos antigos usando o campo "ts"
+        const agendamentosAntigos = await db.collection('agendamentos')
+            .where('ts', '<=', admin.firestore.Timestamp.fromDate(vinteCincoDiasAtras))
+            .get();
+
+        for (const doc of agendamentosAntigos.docs) {
+            const ag = doc.data();
+
+            // Ignora se for cliente de balcão ou se não tiver o ID
+            if (!ag.clienteUid || ag.clienteUid.startsWith('manual_')) continue;
+
+            // Pula se JÁ ENVIAMOS um lembrete para esse agendamento
+            if (ag.lembreteAusenciaEnviado) continue;
+
+            // Verificação de segurança: o cliente voltou depois dessa data?
+            const agendamentosDoCliente = await db.collection('agendamentos')
+                .where('clienteUid', '==', ag.clienteUid)
                 .get();
 
-            for (const doc of usuariosSumidos.docs) {
-                const uData = doc.data();
-                sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
-                if (uData.telefone) {
-                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
-                    await enviarWhatsAppCron(uData.telefone, msgZap);
-                }
+            let temAgendamentoRecente = false;
+            agendamentosDoCliente.forEach(docCli => {
+                const dadosCli = docCli.data();
+                const dataTS = dadosCli.ts ? dadosCli.ts.toDate() : new Date(0);
+                if (dataTS > vinteCincoDiasAtras) temAgendamentoRecente = true;
+            });
+
+            // Se voltou ou o serviço não foi concluído, marca como enviado para sair da fila
+            if (temAgendamentoRecente || (ag.status !== 'concluido' && ag.status !== 'avaliado')) {
+                batch.update(doc.ref, { lembreteAusenciaEnviado: true }); 
+                continue; 
             }
+
+            // Achou o primeiro cliente realmente sumido!
+            console.log(`[CRON] Disparando RETENÇÃO para cliente ausente: ${ag.clienteNome}`);
+            sendNotification(ag.clienteUid, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+            
+            if (ag.clienteTelefone) {
+                const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
+                await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
+            }
+
+            // Marca para não pesquisar de novo e soma no contador
+            batch.update(doc.ref, { lembreteAusenciaEnviado: true });
+            contadorRetencao++;
+            
+            // 🔥 QUEBRA O LOOP: Apenas 1 cliente retido por batida do Cron
+            break; 
         }
 
         await batch.commit();
-        res.status(200).send(`OK: Varredura concluída com sucesso. Envios feitos: ${contador}`);
+        res.status(200).send(`OK: Varredura concluída. Lembretes de Agenda: ${contadorLembretes} | Clientes Retidos: ${contadorRetencao}`);
 
     } catch (error) {
         console.error(error);
