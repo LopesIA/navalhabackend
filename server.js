@@ -312,46 +312,51 @@ app.post('/enviar-notificacao-massa', async (req, res) => {
             return res.status(200).json({ message: "Nenhum dispositivo registrado.", successCount: 0, failureCount: 0 });
         }
 
-        const message = {
-            notification: { title, body },
-            data: { link: '/' }
-        };
-
-        const tokenChunks = [];
-        for (let i = 0; i < uniqueTokens.length; i += 500) {
-            tokenChunks.push(uniqueTokens.slice(i, i + 500));
-        }
-
         let totalSuccessCount = 0;
         let totalFailureCount = 0;
+        const tokensToRemove = [];
 
-        for (const chunk of tokenChunks) {
-            const response = await admin.messaging().sendEachForMulticast({ ...message, tokens: chunk });
-            totalSuccessCount += response.successCount;
-            totalFailureCount += response.failureCount;
+        console.log(`[MASSA] Iniciando envio UM POR UM para ${uniqueTokens.length} dispositivos...`);
 
-            const tokensToRemove = [];
-            response.responses.forEach((result, index) => {
-                const error = result.error?.code;
-                if (error === 'messaging/invalid-registration-token' || error === 'messaging/registration-token-not-registered') {
-                    tokensToRemove.push(chunk[index]);
+        // 🚀 MUDANÇA AQUI: Loop que envia rigorosamente UM DE CADA VEZ
+        for (const token of uniqueTokens) {
+            try {
+                await admin.messaging().send({
+                    token: token,
+                    notification: { title, body },
+                    data: { link: '/' }
+                });
+                totalSuccessCount++;
+                
+                // Delay de 50ms (respiro para o servidor não ser bloqueado por spam)
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            } catch (error) {
+                totalFailureCount++;
+                const errCode = error.code || error.errorInfo?.code;
+                
+                if (errCode === 'messaging/invalid-registration-token' || errCode === 'messaging/registration-token-not-registered') {
+                    tokensToRemove.push(token);
                 }
-            });
+            }
+        }
 
-            if (tokensToRemove.length > 0) {
-                console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
-                const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', tokensToRemove).get();
+        // Limpeza de tokens inválidos (fantasmas)
+        if (tokensToRemove.length > 0) {
+            console.log(`Limpando ${tokensToRemove.length} tokens inválidos.`);
+            // Limpa de 500 em 500 para não estourar o limite do Firestore (in operator)
+            for (let i = 0; i < tokensToRemove.length; i += 500) {
+                const chunk = tokensToRemove.slice(i, i + 500);
+                const usersToUpdate = await db.collection('usuarios').where('fcmTokens', 'array-contains-any', chunk).get();
                 const batch = db.batch();
                 usersToUpdate.forEach(userDoc => {
-                    const ref = userDoc.ref;
-                    batch.update(ref, { fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokensToRemove) });
+                    batch.update(userDoc.ref, { fcmTokens: admin.firestore.FieldValue.arrayRemove(...chunk) });
                 });
                 await batch.commit();
             }
         }
 
         res.status(200).json({
-            message: "Operação de envio em massa concluída.",
+            message: "Operação de envio individual concluída.",
             successCount: totalSuccessCount,
             failureCount: totalFailureCount,
         });
@@ -914,16 +919,19 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (BLINDAGEM ANTI-GAFE POR TELEFONE E CONTA-GOTAS) ---
+// --- CRON JOB ATUALIZADO (MOTOR MATEMÁTICO DE JANELA DE TEMPO) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
+    // Verificação de segurança
     if (key !== process.env.CRON_SECRET_KEY && key !== "Ja997640401") {
         return res.status(401).send('Unauthorized');
     }
 
-    console.log("[CRON] Iniciando ciclo de notificações (5 Fases)...");
+    console.log("[CRON] Iniciando ciclo de notificações (Push + WhatsApp)...");
 
+    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP
+    // 🤖 FUNÇÃO INTERNA PARA DISPARAR WHATSAPP (UM DE CADA VEZ COM ESPERA)
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
@@ -934,25 +942,28 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
             numeroLimpo = destino.replace('@s.whatsapp.net', '').replace(/[^0-9]/g, '');
-            if (!numeroLimpo.startsWith('55') && numeroLimpo.length >= 10) {
-                numeroLimpo = '55' + numeroLimpo;
-            }
         }
         
         const body = { number: numeroLimpo, text: texto };
         
         try {
             const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
-            await fetch(urlEvo, {
+            const r = await fetch(urlEvo, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
                 body: JSON.stringify(body)
             });
+            if (!r.ok) console.error("[CRON ZAP] Erro na Evolution:", await r.text());
+            
+            // ⏳ A MÁGICA AQUI: Obriga o Node a esperar 1 segundo inteiro antes de mandar a próxima mensagem de WhatsApp
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
         } catch (e) {
             console.error("[CRON ZAP] Erro no fetch:", e.message);
         }
     };
 
+    // Força a data para o fuso de São Paulo
     const agoraBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
 
     const formatDateIso = (d) => {
@@ -962,216 +973,87 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         return `${year}-${month}-${day}`;
     };
 
-    const formatDataBR = (isoString) => {
-        const partes = isoString.split('-');
-        return `${partes[2]}/${partes[1]}`;
-    };
-
-    const dataHojeObj = new Date(agoraBrasil);
-    const dataAmanhaObj = new Date(agoraBrasil); dataAmanhaObj.setDate(dataHojeObj.getDate() + 1);
-    const dataQuatroDiasObj = new Date(agoraBrasil); dataQuatroDiasObj.setDate(dataHojeObj.getDate() + 4);
-    const dataOntemObj = new Date(agoraBrasil); dataOntemObj.setDate(dataHojeObj.getDate() - 1);
-    const dataVinteCincoDiasObj = new Date(agoraBrasil); dataVinteCincoDiasObj.setDate(dataHojeObj.getDate() - 25);
-
-    const dataHoje = formatDateIso(dataHojeObj);
-    const dataAmanha = formatDateIso(dataAmanhaObj);
-    const dataQuatroDias = formatDateIso(dataQuatroDiasObj);
-    const dataOntem = formatDateIso(dataOntemObj);
-    const dataAlvo25d = formatDateIso(dataVinteCincoDiasObj);
-
-    const notaCancelamento = "\n\nSe acontecer algum imprevisto e não tiver como comparecer, é só me avisar ou pedir pra cancelar por aqui mesmo, que eu resolvo pra você! 🔄";
-    const notaIA = "\n\n*eu sou uma ia, se eu demorar mais de 30 segundos pra responder, reenvie sua mensagem, pois eu posso não ter recebido*";
-
+    const dataHoje = formatDateIso(agoraBrasil);
     const batch = db.batch();
-    let contadorEnvios = 0;
+    let contador = 0;
 
     try {
-        // =====================================================================
-        // FASE 1: HOJE (Lembretes de 1 Hora e 20 Minutos)
-        // =====================================================================
-        const snapHoje = await db.collection('agendamentos').where('data', '==', dataHoje).where('status', 'in', ['confirmado', 'conclusão pendente']).get();
+        console.log(`[CRON] Buscando agendamentos para o dia de hoje: ${dataHoje}`);
+
+        // 1. Busca TODOS os agendamentos confirmados DO DIA (Muito mais seguro)
+        const snapHoje = await db.collection('agendamentos')
+            .where('data', '==', dataHoje)
+            .where('status', 'in', ['confirmado', 'conclusão pendente'])
+            .get();
 
         for (const doc of snapHoje.docs) {
             const ag = doc.data();
-            if (!ag.horario) continue; 
-            const [horas, minutos] = ag.horario.split(':').map(Number);
-            const horaAgendamento = new Date(agoraBrasil); horaAgendamento.setHours(horas, minutos, 0, 0);
-            const minutosFaltando = Math.floor((horaAgendamento.getTime() - agoraBrasil.getTime()) / 60000);
+            if (!ag.horario) continue; // Pula se houver erro no banco
 
+            // Transforma o "15:30" do banco em uma Data real para calcular os minutos
+            const [horas, minutos] = ag.horario.split(':').map(Number);
+            const horaAgendamento = new Date(agoraBrasil);
+            horaAgendamento.setHours(horas, minutos, 0, 0);
+
+            // Calcula a diferença exata em MINUTOS entre AGORA e o AGENDAMENTO
+            const diffMs = horaAgendamento.getTime() - agoraBrasil.getTime();
+            const minutosFaltando = Math.floor(diffMs / 60000);
+
+            // === A. LEMBRETE DE 1 HORA (Janela entre 45 e 65 minutos) ===
+            // Assim, se o Cron bater aos 58 minutos ou 47 minutos, ele pega do mesmo jeito!
             if (minutosFaltando <= 65 && minutosFaltando >= 45 && !ag.lembrete1hEnviado) {
+                console.log(`[CRON] Disparando 1H para ${ag.clienteNome} (${ag.horario})`);
+                
+                sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
+                
                 if (ag.clienteTelefone) {
-                    const msgZap = `⏰ *Lembrete King Agenda*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para lembrar que o seu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\n\nTe esperamos lá! ✂️${notaCancelamento}${notaIA}`;
+                    const msgZap = `⏰ *Lembrete King Agenda*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para lembrar que o seu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\n\nTe esperamos lá! ✂️`;
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                 }
+
                 batch.update(doc.ref, { lembrete1hEnviado: true });
-                contadorEnvios++;
+                contador++;
             }
+
+            // === B. LEMBRETE DE 20 MINUTOS (Janela entre 5 e 25 minutos) ===
             else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado && !ag.lembrete10minEnviado) {
+                console.log(`[CRON] Disparando 20MIN para ${ag.clienteNome} (${ag.horario})`);
+                
+                sendNotification(ag.clienteUid, '🚀 É daqui a pouco!', `Seu corte é em 20 minutos! Se precisar cancelar, faça isso AGORA no app.`, { link: '#historico' });
+                
                 if (ag.clienteTelefone) {
-                    const msgZap = `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!${notaCancelamento}${notaIA}`;
+                    const msgZap = `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!\nCaso ocorra algum imprevisto, por favor nos avise.`;
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
                 }
+
                 batch.update(doc.ref, { lembrete20minEnviado: true, lembrete10minEnviado: true });
-                contadorEnvios++;
+                contador++;
             }
         }
 
-        // =====================================================================
-        // FASE 2: AMANHÃ (Aviso de 24 Horas Antes)
-        // =====================================================================
-        const snapAmanha = await db.collection('agendamentos').where('data', '==', dataAmanha).where('status', 'in', ['confirmado', 'conclusão pendente']).get();
-
-        for (const doc of snapAmanha.docs) {
-            const ag = doc.data();
-            if (!ag.horario || ag.lembrete24hEnviado) continue;
-            const [horas, minutos] = ag.horario.split(':').map(Number);
-            const horaAgendamentoAmanha = new Date(dataAmanhaObj); horaAgendamentoAmanha.setHours(horas, minutos, 0, 0);
-            const minutosFaltando = Math.floor((horaAgendamentoAmanha.getTime() - agoraBrasil.getTime()) / 60000);
-
-            if (minutosFaltando <= 1470 && minutosFaltando >= 1410) {
-                if (ag.clienteTelefone) {
-                    const msgZap = `⏳ *Falta 1 Dia!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para confirmar seu corte amanhã (${formatDataBR(dataAmanha)}) às ${ag.horario} com *${ag.barbeiroNome}*.${notaCancelamento}${notaIA}`;
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
-                }
-                batch.update(doc.ref, { lembrete24hEnviado: true });
-                contadorEnvios++;
-            }
-        }
-
-        // =====================================================================
-        // FASE 3: DAQUI A 4 DIAS (Antecipação)
-        // =====================================================================
-        const snapQuatroDias = await db.collection('agendamentos').where('data', '==', dataQuatroDias).where('status', 'in', ['confirmado', 'conclusão pendente']).get();
-
-        for (const doc of snapQuatroDias.docs) {
-            const ag = doc.data();
-            if (!ag.horario || ag.lembrete4dEnviado) continue;
-            const [horas, minutos] = ag.horario.split(':').map(Number);
-            const horaAgendamento4d = new Date(dataQuatroDiasObj); horaAgendamento4d.setHours(horas, minutos, 0, 0);
-            const minutosFaltando = Math.floor((horaAgendamento4d.getTime() - agoraBrasil.getTime()) / 60000);
-
-            if (minutosFaltando <= 5790 && minutosFaltando >= 5730) {
-                if (ag.clienteTelefone) {
-                    const msgZap = `📅 *Agendamento Confirmado!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Seu agendamento de *${ag.servico}* com *${ag.barbeiroNome}* está chegando. Será no dia ${formatDataBR(dataQuatroDias)} às ${ag.horario}.${notaCancelamento}${notaIA}`;
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
-                }
-                batch.update(doc.ref, { lembrete4dEnviado: true });
-                contadorEnvios++;
-            }
-        }
-
-        // =====================================================================
-        // FASE 4: ONTEM (Pós-Venda + Check da Recorrência)
-        // =====================================================================
-        const snapOntem = await db.collection('agendamentos').where('data', '==', dataOntem).where('status', '==', 'concluido').get();
-
-        for (const doc of snapOntem.docs) {
-            const ag = doc.data();
-            if (!ag.horario || ag.posCorteEnviado) continue;
-            const [horas, minutos] = ag.horario.split(':').map(Number);
-            const horaAgendamentoOntem = new Date(dataOntemObj); horaAgendamentoOntem.setHours(horas, minutos, 0, 0);
-            const minutosPassados = Math.floor((agoraBrasil.getTime() - horaAgendamentoOntem.getTime()) / 60000);
-
-            if (minutosPassados <= 1470 && minutosPassados >= 1410) {
-                
-                // Pesquisa por TELEFONE para evitar erros de UID
-                let temAgendamentoFuturo = false;
-                let textoFuturo = "Que tal já deixar o próximo horário garantido para não correr o risco de ficar sem vaga? É só me pedir!";
-                
-                if (ag.clienteTelefone) {
-                    const futureSnap = await db.collection('agendamentos').where('clienteTelefone', '==', ag.clienteTelefone).get();
-                    futureSnap.forEach(fDoc => {
-                        const historicoFuturo = fDoc.data();
-                        // Se achou um agendamento pra amanhã em diante
-                        if (historicoFuturo.data > dataHoje && ['confirmado', 'conclusão pendente', 'pendente'].includes(historicoFuturo.status)) {
-                            temAgendamentoFuturo = true;
-                            textoFuturo = `Vi aqui no sistema que o seu próximo agendamento já está marcado para o dia ${formatDataBR(historicoFuturo.data)} às ${historicoFuturo.horario}.\n\nDeseja manter esse agendamento ou prefere remarcar/cancelar?`;
-                        }
-                    });
-
-                    const msgZap = `✨ *Obrigado pela visita!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer sua presença ontem. Esperamos que tenha curtido o talento! ✂️\n\n${textoFuturo}${notaCancelamento}${notaIA}`;
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
-                }
-                
-                batch.update(doc.ref, { posCorteEnviado: true });
-                contadorEnvios++;
-            }
-        }
-
-        // =====================================================================
-        // FASE 5: RETENÇÃO (>25 DIAS) - MÁXIMA SEGURANÇA POR TELEFONE
-        // =====================================================================
-        const horaAtual = agoraBrasil.getHours();
-        
-        if (horaAtual >= 9 && horaAtual < 20) {
-            let configDoc = await db.collection('config').doc('varredura_retencao').get();
-            let dataVarredura = dataAlvo25d; 
+        // === 3. RETENÇÃO (CLIENTES SUMIDOS HÁ 25 DIAS) ===
+        // Executa só na janela das 10:00 da manhã
+        if (agoraBrasil.getHours() === 10 && agoraBrasil.getMinutes() < 10) { 
+            const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
             
-            if (configDoc.exists && configDoc.data().dataCursor) {
-                dataVarredura = configDoc.data().dataCursor;
-                if (dataVarredura > dataAlvo25d || parseInt(dataVarredura.split('-')[0]) < 2023) {
-                    dataVarredura = dataAlvo25d;
-                }
-            }
-
-            console.log(`[CRON RETENÇÃO] Varrendo clientes do dia: ${dataVarredura}`);
-
-            const snapAtrasados = await db.collection('agendamentos')
-                .where('data', '==', dataVarredura)
-                .where('status', '==', 'concluido')
+            const usuariosSumidos = await db.collection('usuarios')
+                .where('tipo', '==', 'cliente')
+                .where('ultimoAgendamento', '<=', vinteCincoDiasAtras)
+                .limit(50) 
                 .get();
 
-            let enviosNestaRodada = 0;
-
-            for (const doc of snapAtrasados.docs) {
-                if (enviosNestaRodada >= 5) break; 
-                
-                const ag = doc.data();
-                if (ag.retencaoEnviada || !ag.clienteTelefone) continue;
-                
-                // 🛡️ A MURALHA DE FOGO: BUSCA PELO TELEFONE
-                const todosAgendamentosDesseCliente = await db.collection('agendamentos')
-                    .where('clienteTelefone', '==', ag.clienteTelefone)
-                    .get();
-                
-                let realmenteSumiu = true;
-
-                todosAgendamentosDesseCliente.forEach(d => {
-                    const historico = d.data();
-                    // Se o número de telefone cortou o cabelo DEPOIS da data de varredura, ou tem algo agendado pro futuro...
-                    if (historico.data > dataVarredura && ['concluido', 'confirmado', 'conclusão pendente', 'imediato', 'pendente'].includes(historico.status)) {
-                        realmenteSumiu = false;
-                    }
-                });
-
-                if (realmenteSumiu) {
-                    const msgZap = `✂️ *Sentimos sua falta!*\n\nFala ${ag.clienteNome || 'campeão'}, tudo bem?\nDei uma olhada aqui e vi que já faz um tempinho desde o seu último corte com o *${ag.barbeiroNome}*.\n\nSeu estilo é a sua marca registrada! Que tal já garantir um horário pra dar aquele talento de respeito no visual?\n\nÉ só me falar o melhor dia ou pedir pra agendar! 💈${notaIA}`;
-                    
-                    await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
-                    enviosNestaRodada++;
-                    contadorEnvios++;
-                } else {
-                    console.log(`[RETENÇÃO] Falso positivo evitado! O telefone ${ag.clienteTelefone} esteve na barbearia recentemente.`);
+            for (const doc of usuariosSumidos.docs) {
+                const uData = doc.data();
+                sendNotification(doc.id, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
+                if (uData.telefone) {
+                    const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${uData.nome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
+                    await enviarWhatsAppCron(uData.telefone, msgZap);
                 }
-
-                // Carimba que o agendamento daquela data específica já foi checado
-                batch.update(doc.ref, { retencaoEnviada: true });
-            }
-
-            if (enviosNestaRodada < 5) {
-                const dataVObj = new Date(dataVarredura + 'T12:00:00');
-                dataVObj.setDate(dataVObj.getDate() - 1);
-                const novoCursor = formatDateIso(dataVObj);
-                
-                batch.set(db.collection('config').doc('varredura_retencao'), {
-                    dataCursor: novoCursor,
-                    ts: admin.firestore.FieldValue.serverTimestamp()
-                });
             }
         }
 
         await batch.commit();
-        res.status(200).send(`OK: Varredura concluída. Envios totais: ${contadorEnvios}`);
+        res.status(200).send(`OK: Varredura concluída com sucesso. Envios feitos: ${contador}`);
 
     } catch (error) {
         console.error(error);
@@ -1319,18 +1201,40 @@ app.post('/api/disparar-sos', async (req, res) => {
             }
         };
 
-        // 3. Envia em Lotes (Multicast)
-        const response = await admin.messaging().sendEachForMulticast({
-            ...message,
-            tokens: uniqueTokens
-        });
+        const message = {
+            notification: {
+                title: `🚨 SOS: ${desconto}% OFF!`,
+                body: `${nomeProfissional} liberou uma vaga agora! ${mensagem}`
+            },
+            data: {
+                link: '#barbeiros', 
+                forceAlarm: 'true'  
+            }
+        };
 
-        console.log(`[SOS] Enviado para ${uniqueTokens.length} dispositivos próximos.`);
+        // 3. Envia UM POR UM (Substituindo o Multicast)
+        let successCount = 0;
+        console.log(`[SOS] Enviando alertas UM POR UM para ${uniqueTokens.length} clientes...`);
+
+        for (const token of uniqueTokens) {
+            try {
+                await admin.messaging().send({
+                    token: token,
+                    ...message
+                });
+                successCount++;
+                
+                // Delay de 50ms para garantir estabilidade
+                await new Promise(resolve => setTimeout(resolve, 50)); 
+            } catch (error) {
+                console.warn(`[SOS] Falha ao enviar para o token (ignorando):`, error.message);
+            }
+        }
 
         res.status(200).json({ 
             success: true, 
             message: `Alerta enviado para ${countUsuariosProximos} clientes próximos!`,
-            sendedCount: response.successCount 
+            sendedCount: successCount 
         });
 
     } catch (error) {
@@ -2982,118 +2886,6 @@ app.get('/desligar-trava', async (req, res) => {
         });
     } catch (e) {
         res.send("Erro ao desligar a trava: " + e.message);
-    }
-});
-
-// ==================================================================
-// 🔁 CRON JOB: PROCESSAR RECORRÊNCIAS (GERAR FUTUROS)
-// Recomendado rodar 1x ao dia (Ex: 03:00 da manhã) via UptimeRobot
-// Rota: /cron/processar-recorrencias?key=SUA_CHAVE
-// ==================================================================
-app.get('/cron/processar-recorrencias', async (req, res) => {
-    const { key } = req.query;
-    
-    // Verificação de segurança (mesma do lembrete)
-    if (key !== process.env.CRON_SECRET_KEY && key !== "Ja997640401") {
-        return res.status(401).send('Unauthorized');
-    }
-
-    console.log("[CRON RECORRÊNCIA] Iniciando varredura de recorrências ativas...");
-
-    try {
-        // Data e fuso horário corretos (Brasília)
-        const agora = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-        
-        // Limite de segurança: Mantemos a agenda preenchida sempre por 60 dias no futuro
-        const limiteFuturo = new Date(agora);
-        limiteFuturo.setDate(limiteFuturo.getDate() + 60);
-
-        // 1. Busca as "Mães" (configurações ativas)
-        const snapRecorrencias = await db.collection('config_recorrencias')
-            .where('ativa', '==', true)
-            .get();
-
-        if (snapRecorrencias.empty) {
-            return res.status(200).send("OK: Nenhuma recorrência ativa encontrada.");
-        }
-
-        const batch = db.batch();
-        let totalGerados = 0;
-        let totalConfiguracoesAtualizadas = 0;
-
-        snapRecorrencias.forEach(doc => {
-            const config = doc.data();
-            if (!config.ultimaDataGerada || !config.intervaloDias) return;
-
-            // Transforma a data salva em objeto Date (usamos T12:00:00 para não ter problema de fuso)
-            let dataUltima = new Date(config.ultimaDataGerada + 'T12:00:00');
-            let gerouNovo = false;
-
-            // 2. Loop de abastecimento
-            // Se a última data da agenda for menor que os 60 dias no futuro, ele fabrica novos agendamentos
-            while (dataUltima < limiteFuturo) {
-                // Dá o salto de X dias configurado (Ex: +15 dias)
-                dataUltima.setDate(dataUltima.getDate() + config.intervaloDias);
-                
-                // Se o salto passou do nosso limite, para o loop
-                if (dataUltima > limiteFuturo) break;
-
-                const ano = dataUltima.getFullYear();
-                const mes = (dataUltima.getMonth() + 1).toString().padStart(2, '0');
-                const dia = dataUltima.getDate().toString().padStart(2, '0');
-                const dataAgendamentoSql = `${ano}-${mes}-${dia}`;
-
-                // 3. Fabrica o agendamento "Filho"
-                const novoAgRef = db.collection('agendamentos').doc();
-                batch.set(novoAgRef, {
-                    recorrenciaId: doc.id,
-                    barbeiroUid: config.barbeiroUid,
-                    barbeiroNome: config.barbeiroNome,
-                    donoUid: config.donoUid,
-                    clienteUid: config.clienteUid,
-                    clienteNome: config.clienteNome + ' 🔁',
-                    clienteTelefone: config.clienteTelefone || '',
-                    servico: config.servico,
-                    valor: config.valor || 0,
-                    valorOriginal: config.valor || 0,
-                    data: dataAgendamentoSql,
-                    horario: config.horario,
-                    duracao: config.duracao || 30,
-                    status: 'confirmado',
-                    origem: 'recorrencia_auto',
-                    ts: admin.firestore.FieldValue.serverTimestamp(),
-                    lembreteConcluirEnviado: false,
-                    clienteNotificado: false
-                });
-
-                gerouNovo = true;
-                totalGerados++;
-                config.ultimaDataGerada = dataAgendamentoSql; // Atualiza a memória para o próximo salto
-            }
-
-            // 4. Se a fábrica trabalhou, atualiza a data na "Mãe"
-            if (gerouNovo) {
-                batch.update(doc.ref, {
-                    ultimaDataGerada: config.ultimaDataGerada,
-                    atualizadoEm: admin.firestore.FieldValue.serverTimestamp()
-                });
-                totalConfiguracoesAtualizadas++;
-            }
-        });
-
-        // 5. Salva tudo de uma vezada só no Firestore (Alta performance)
-        if (totalGerados > 0) {
-            await batch.commit();
-            console.log(`[CRON RECORRÊNCIA] Sucesso! ${totalGerados} agendamentos gerados em ${totalConfiguracoesAtualizadas} recorrências.`);
-            res.status(200).send(`OK: Foram gerados ${totalGerados} novos agendamentos para manter a agenda cheia.`);
-        } else {
-            console.log("[CRON RECORRÊNCIA] Tudo em dia. Nenhum agendamento novo necessário.");
-            res.status(200).send("OK: Agenda já está preenchida até o limite. Nenhum novo agendamento gerado.");
-        }
-
-    } catch (error) {
-        console.error("[CRON RECORRÊNCIA] Erro:", error);
-        res.status(500).send("Erro no processamento: " + error.message);
     }
 });
 
