@@ -2517,14 +2517,61 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                         if (nomeBanco.includes(buscaNomeB)) { 
                                             novoBarbeiroUid = uDoc.id; 
                                             novoBarbeiroNome = u.nome; 
-                                            barbeiroObjCompleto = u;
+                                            barbeiroObjCompleto = { uid: uDoc.id, ...u }; // Garante que o uid esteja dentro do objeto
                                         }
                                     });
 
                                     if (!barbeiroObjCompleto) {
                                         functionResult = { erro: "Profissional destino não encontrado." };
                                     } else {
-                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 40;
+                                        
+                                        // 🚀 A MÁGICA COMEÇA AQUI: Busca o novo serviço na tabela real
+                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 30;
+                                        let valorServico = oldData.valorOriginal || oldData.valor || 0;
+                                        let nomeServicoOficial = oldData.servico;
+                                        let comissaoCalculada = oldData.comissaoCalculada || 0;
+                                        
+                                        // Busca o percentual do barbeiro (com vários fallbacks de segurança)
+                                        let percentual = barbeiroObjCompleto.percentualComissao || barbeiroObjCompleto.comissao || barbeiroObjCompleto.taxaComissao || 50;
+
+                                        // Se a IA solicitou a troca de serviço
+                                        if (fnArgs.novoServico) {
+                                            const nomeBarbeariaTarget = barbeiroObjCompleto.nomeBarbearia || "Barbearia King";
+                                            // Puxa da tabela geral da barbearia OU da lista individual do barbeiro
+                                            const lista = tabelaServicosPorBarbearia[nomeBarbeariaTarget] || barbeiroObjCompleto.listaServicos || [];
+                                            
+                                            const buscaServico = fnArgs.novoServico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                            
+                                            let achado = lista.find(s => {
+                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                return nomeS === buscaServico;
+                                            });
+
+                                            if (!achado) {
+                                                const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
+                                                achado = listaOrdenada.find(s => {
+                                                    const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                    return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
+                                                });
+                                            }
+
+                                            // SE ACHOU O SERVIÇO NA TABELA, ATUALIZA TUDO!
+                                            if (achado) {
+                                                if (achado.valor) valorServico = Number(achado.valor);
+                                                else if (achado.preco) valorServico = Number(achado.preco);
+                                                
+                                                if (achado.duracao) duracaoServ = Number(achado.duracao);
+                                                nomeServicoOficial = achado.nome || achado;
+                                                
+                                                // Recalcula a comissão
+                                                comissaoCalculada = (valorServico * Number(percentual)) / 100;
+                                            } else {
+                                                // Se a IA inventou um serviço que não existe, cancela a operação
+                                                functionResult = { erro: `O serviço '${fnArgs.novoServico}' NÃO EXISTE na tabela.` };
+                                                return; // Aborta
+                                            }
+                                        }
+
                                         const novoInicio = timeToMin(novoHorarioFinal);
                                         const novoFim = novoInicio + duracaoServ; 
                                         const isValido = await validarExpediente(barbeiroObjCompleto, novaDataFinal, novoInicio, novoFim);
@@ -2544,8 +2591,9 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 if (doc.id !== targetDoc.id) { 
                                                     const ag = doc.data();
                                                     const ocInicio = timeToMin(ag.horario);
-                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
+                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 30;
                                                     const ocFim = ocInicio + ocDuracao; 
+                                                    // Verifica o acavalamento usando a NOVA duração
                                                     if (novoInicio < ocFim && novoFim > ocInicio) {
                                                         temConflito = true;
                                                     }
@@ -2553,18 +2601,27 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                             });
 
                                             if (temConflito) {
-                                                functionResult = { erro: "HORÁRIO NOVO JÁ OCUPADO." };
+                                                functionResult = { erro: "HORÁRIO NOVO JÁ OCUPADO (Não há tempo suficiente para este serviço)." };
                                             } else {
+                                                
+                                                // 📦 MONTA O PACOTE DE ATUALIZAÇÃO COMPLETO
                                                 let novosDados = {
                                                     data: novaDataFinal,
                                                     horario: novoHorarioFinal,
                                                     barbeiroUid: novoBarbeiroUid,
-                                                    barbeiroNome: novoBarbeiroNome
+                                                    barbeiroNome: novoBarbeiroNome,
+                                                    servico: nomeServicoOficial,
+                                                    valor: valorServico,
+                                                    valorOriginal: valorServico,
+                                                    valorFinalPago: valorServico,
+                                                    duracao: duracaoServ,
+                                                    comissaoCalculada: comissaoCalculada,
+                                                    percentualComissao: Number(percentual),
+                                                    editadoEm: admin.firestore.FieldValue.serverTimestamp()
                                                 };
-                                                if (fnArgs.novoServico) novosDados.servico = fnArgs.novoServico;
 
                                                 await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
-                                                functionResult = { status: "SUCESSO", msg: "Atualizado." };
+                                                functionResult = { status: "SUCESSO", msg: "Atualizado.", novoValor: valorServico };
                                             }
                                         }
                                     }
