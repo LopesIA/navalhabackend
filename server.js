@@ -2358,8 +2358,9 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 nome: d.nome, 
                                                 percentual: d.percentualComissao || 50, 
                                                 agenda: d.agenda,
+                                                listaServicos: d.listaServicos, // 👈 SALVA A LISTA DELE
                                                 nomeBarbearia: d.nomeBarbearia || "Barbearia King",
-                                                donoUid: d.donoUid || doc.id // 👈 SALVA O DONO PARA BUSCAR O PREÇO CERTO
+                                                donoUid: d.donoUid || d.vinculoSalao || (d.pertenceABarbearia ? d.pertenceABarbearia.uid : null) || doc.id 
                                             };
                                         }
                                     }
@@ -2373,24 +2374,32 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     
                                     const novoInicio = timeToMin(horaFinal);
                                     
-                                    // 🎯 LISTA OFICIAL DE SERVIÇOS DA BARBEARIA
-                                    const lista = tabelaServicosPorBarbearia[barbeiroEncontrado.nomeBarbearia] || [];
+                                    // 🎯 BUSCA A LISTA OFICIAL DO BARBEIRO OU DO DONO DIRETAMENTE DO BANCO!
+                                    let lista = barbeiroEncontrado.listaServicos || [];
+                                    if (lista.length === 0) {
+                                        let idDono = barbeiroEncontrado.donoUid;
+                                        if (typeof idDono === 'object' && idDono !== null) idDono = idDono.uid;
+                                        if (idDono && idDono !== barbeiroEncontrado.uid) {
+                                            const docDono = await db.collection('usuarios').doc(idDono).get();
+                                            if (docDono.exists && docDono.data().listaServicos) {
+                                                lista = docDono.data().listaServicos;
+                                            }
+                                        }
+                                    }
                                     
                                     let valorServico = 0; 
                                     let nomeServicoOficial = "";
-                                    let duracaoServicoFinal = 30; // Duração padrão segura
-                                    let servicoEncontradoNoBanco = false; // A nossa Trava de Segurança!
+                                    let duracaoServicoFinal = 30; 
+                                    let servicoEncontradoNoBanco = false; 
 
                                     if (lista.length > 0) {
                                         const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                                         
-                                        // 1️⃣ TENTATIVA 1: BUSCA EXATA (Garante que "Corte" não puxe "Corte e Barba")
                                         let achado = lista.find(s => {
                                             const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                                             return nomeS === buscaServico;
                                         });
 
-                                        // 2️⃣ TENTATIVA 2: BUSCA APROXIMADA (Só entra aqui se a IA errou alguma letra boba)
                                         if (!achado) {
                                             const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
                                             achado = listaOrdenada.find(s => {
@@ -2399,23 +2408,18 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                             });
                                         }
                                         
-                                        // SE ACHOU COM SUCESSO, PEGA OS VALORES REAIS DO SEU BANCO DE DADOS
                                         if (achado) {
                                             servicoEncontradoNoBanco = true;
-                                            
                                             if (achado.valor) valorServico = Number(achado.valor);
                                             else if (achado.preco) valorServico = Number(achado.preco);
-                                            
                                             if (achado.duracao) duracaoServicoFinal = Number(achado.duracao);
                                             nomeServicoOficial = achado.nome || achado;
                                         }
                                     }
 
-                                    // 🛑 GOLPE FATAL: Se a IA inventou um serviço, aborta o agendamento imediatamente!
                                     if (!servicoEncontradoNoBanco) {
                                         functionResult = { erro: `O serviço '${fnArgs.servico}' NÃO EXISTE na tabela oficial. Use exatamente os nomes listados no cardápio.` };
                                     } else {
-                                        // Continua com o agendamento normal porque o serviço e o preço estão 100% corretos!
                                         const novoFim = novoInicio + duracaoServicoFinal; 
                                         const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
 
@@ -2469,13 +2473,156 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                     metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
                                                 });
                                                 
-                                                // 🎯 AGORA A FERRAMENTA DEVOLVE O VALOR CORRETO PARA A IA!
                                                 functionResult = { status: "SUCESSO", valor: valorServico };
                                             }
                                         }
-                                    } // Fim do else (servicoEncontradoNoBanco)
-                                } // Fim do else (barbeiroEncontrado)
+                                    } 
+                                } 
                             } catch (e) { functionResult = { erro: "Erro ao agendar: " + e.message }; }
+                        }
+
+                        // === 4. ATUALIZAR AGENDAMENTO ===
+                        else if (fnName === "atualizar_agendamento") {
+                            try {
+                                let hAntigo = fnArgs.horarioAntigo;
+                                if (hAntigo && !hAntigo.startsWith("0") && hAntigo.length === 4) hAntigo = "0" + hAntigo;
+
+                                const agSnap = await baseQuery
+                                    .where('data', '==', fnArgs.dataAntiga)
+                                    .where('horario', '==', hAntigo)
+                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                    .get();
+
+                                if (agSnap.empty) {
+                                    functionResult = { erro: "Agendamento antigo não encontrado ou sem permissão." };
+                                } else {
+                                    const targetDoc = agSnap.docs[0];
+                                    const oldData = targetDoc.data();
+                                    
+                                    let novaDataFinal = fnArgs.novaData || oldData.data;
+                                    let novoHorarioFinal = fnArgs.novoHorario || oldData.horario;
+                                    if (!novoHorarioFinal.startsWith("0") && novoHorarioFinal.length === 4) novoHorarioFinal = "0" + novoHorarioFinal;
+
+                                    let novoBarbeiroUid = oldData.barbeiroUid;
+                                    let novoBarbeiroNome = oldData.barbeiroNome;
+                                    let barbeiroObjCompleto = null;
+
+                                    const allUsers = await db.collection('usuarios').get();
+                                    const buscaNomeB = (fnArgs.novoBarbeiroNome || oldData.barbeiroNome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                    
+                                    allUsers.forEach(uDoc => {
+                                        const u = uDoc.data();
+                                        const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        if (nomeBanco.includes(buscaNomeB)) { 
+                                            novoBarbeiroUid = uDoc.id; 
+                                            novoBarbeiroNome = u.nome; 
+                                            barbeiroObjCompleto = { uid: uDoc.id, ...u }; 
+                                        }
+                                    });
+
+                                    if (!barbeiroObjCompleto) {
+                                        functionResult = { erro: "Profissional destino não encontrado." };
+                                    } else {
+                                        
+                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 30;
+                                        let valorServico = oldData.valorOriginal || oldData.valor || 0;
+                                        let nomeServicoOficial = oldData.servico;
+                                        let comissaoCalculada = oldData.comissaoCalculada || 0;
+                                        let percentual = barbeiroObjCompleto.percentualComissao || barbeiroObjCompleto.comissao || barbeiroObjCompleto.taxaComissao || 50;
+
+                                        if (fnArgs.novoServico) {
+                                            // 🎯 BUSCA A LISTA OFICIAL DO BARBEIRO OU DO DONO DIRETAMENTE DO BANCO!
+                                            let lista = barbeiroObjCompleto.listaServicos || [];
+                                            if (lista.length === 0) {
+                                                let idDono = barbeiroObjCompleto.donoUid || barbeiroObjCompleto.vinculoSalao || (barbeiroObjCompleto.pertenceABarbearia ? barbeiroObjCompleto.pertenceABarbearia.uid : null);
+                                                if (typeof idDono === 'object' && idDono !== null) idDono = idDono.uid;
+                                                if (idDono && idDono !== barbeiroObjCompleto.uid) {
+                                                    const docDono = await db.collection('usuarios').doc(idDono).get();
+                                                    if (docDono.exists && docDono.data().listaServicos) {
+                                                        lista = docDono.data().listaServicos;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            const buscaServico = fnArgs.novoServico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                            
+                                            let achado = lista.find(s => {
+                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                return nomeS === buscaServico;
+                                            });
+
+                                            if (!achado) {
+                                                const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
+                                                achado = listaOrdenada.find(s => {
+                                                    const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                                    return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
+                                                });
+                                            }
+
+                                            if (achado) {
+                                                if (achado.valor) valorServico = Number(achado.valor);
+                                                else if (achado.preco) valorServico = Number(achado.preco);
+                                                if (achado.duracao) duracaoServ = Number(achado.duracao);
+                                                nomeServicoOficial = achado.nome || achado;
+                                                comissaoCalculada = (valorServico * Number(percentual)) / 100;
+                                            } else {
+                                                functionResult = { erro: `O serviço '${fnArgs.novoServico}' NÃO EXISTE na tabela.` };
+                                                return;
+                                            }
+                                        }
+
+                                        const novoInicio = timeToMin(novoHorarioFinal);
+                                        const novoFim = novoInicio + duracaoServ; 
+                                        const isValido = await validarExpediente(barbeiroObjCompleto, novaDataFinal, novoInicio, novoFim);
+
+                                        if (!isValido) {
+                                            functionResult = { erro: "O novo horário está fora do expediente." };
+                                        } else {
+                                            const conflitoSnap = await db.collection('agendamentos')
+                                                .where('barbeiroUid', '==', novoBarbeiroUid)
+                                                .where('data', '==', novaDataFinal)
+                                                .where('status', 'in', ['confirmado', 'conclusão pendente'])
+                                                .limit(100)
+                                                .get();
+
+                                            let temConflito = false;
+                                            conflitoSnap.forEach(doc => {
+                                                if (doc.id !== targetDoc.id) { 
+                                                    const ag = doc.data();
+                                                    const ocInicio = timeToMin(ag.horario);
+                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 30;
+                                                    const ocFim = ocInicio + ocDuracao; 
+                                                    if (novoInicio < ocFim && novoFim > ocInicio) {
+                                                        temConflito = true;
+                                                    }
+                                                }
+                                            });
+
+                                            if (temConflito) {
+                                                functionResult = { erro: "HORÁRIO NOVO JÁ OCUPADO." };
+                                            } else {
+                                                let novosDados = {
+                                                    data: novaDataFinal,
+                                                    horario: novoHorarioFinal,
+                                                    barbeiroUid: novoBarbeiroUid,
+                                                    barbeiroNome: novoBarbeiroNome,
+                                                    servico: nomeServicoOficial,
+                                                    valor: valorServico,
+                                                    valorOriginal: valorServico,
+                                                    valorFinalPago: valorServico,
+                                                    duracao: duracaoServ,
+                                                    comissaoCalculada: comissaoCalculada,
+                                                    percentualComissao: Number(percentual),
+                                                    editadoEm: admin.firestore.FieldValue.serverTimestamp()
+                                                };
+
+                                                await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
+                                                functionResult = { status: "SUCESSO", msg: "Atualizado.", novoValor: valorServico };
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) { functionResult = { erro: e.message }; }
                         }
 
                         // === 4. ATUALIZAR AGENDAMENTO ===
