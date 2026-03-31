@@ -1677,46 +1677,63 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         }
 
         // =========================================================
-        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
+        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL (COM CACHE)
         // =========================================================
         if (numeroRemetente && numeroRemetente.includes('@lid')) {
-            const nomeWhatsapp = data.data?.pushName;
-            
-            if (nomeWhatsapp) {
-                console.log(`[ZAP] 👻 Fantasma detectado! Nome: ${nomeWhatsapp}. Vasculhando banco...`);
-                
-                try {
-                    let usuariosEncontrados = [];
-                    const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+            // 1. TENTA O CACHE PRIMEIRO (Para nunca mais falhar depois da 1ª vez)
+            try {
+                const cacheLid = await db.collection('lid_mapping').doc(numeroRemetente).get();
+                if (cacheLid.exists) {
+                    numeroRemetente = cacheLid.data().realNumber;
+                    console.log(`[ZAP] 🎯 Fantasma já conhecido no Cache! Número real: ${numeroRemetente}`);
+                } else {
+                    // 2. SE NÃO TEM NO CACHE, VAI CAÇAR PELO NOME
+                    // Puxa o nome de todos os lugares possíveis da Evolution para não perder
+                    const nomeWhatsapp = data.data?.pushName || msgInfo?.pushName || data.sender?.name || data.sender?.pushName;
                     
-                    const allUsers = await db.collection('usuarios').get();
-                    allUsers.forEach(doc => {
-                        const u = doc.data();
-                        if (u.telefone && u.nome) {
-                            const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                            if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
-                                usuariosEncontrados.push(u.telefone);
-                            }
-                        }
-                    });
-
-                    if (usuariosEncontrados.length === 1) {
-                        let numeroRealEncontrado = usuariosEncontrados[0];
-                        numeroRealEncontrado = numeroRealEncontrado.replace(/[^0-9]/g, ''); 
-                        if (!numeroRealEncontrado.startsWith('55')) {
-                            numeroRealEncontrado = '55' + numeroRealEncontrado;
-                        }
-                        numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+                    if (nomeWhatsapp) {
+                        console.log(`[ZAP] 👻 Fantasma novo detectado! Nome: ${nomeWhatsapp}. Vasculhando banco...`);
                         
-                        console.log(`[ZAP] 🎯 O número real de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
-                        numeroRemetente = numeroRealEncontrado; 
+                        let usuariosEncontrados = [];
+                        const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                        
+                        const allUsers = await db.collection('usuarios').get();
+                        allUsers.forEach(doc => {
+                            const u = doc.data();
+                            if (u.telefone && u.nome) {
+                                const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
+                                    usuariosEncontrados.push(u.telefone);
+                                }
+                            }
+                        });
+
+                        if (usuariosEncontrados.length === 1) {
+                            let numeroRealEncontrado = usuariosEncontrados[0];
+                            numeroRealEncontrado = numeroRealEncontrado.replace(/[^0-9]/g, ''); 
+                            if (!numeroRealEncontrado.startsWith('55')) {
+                                numeroRealEncontrado = '55' + numeroRealEncontrado;
+                            }
+                            numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+                            
+                            console.log(`[ZAP] 🎯 Descoberta feita! O número de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
+                            
+                            // 🔥 SALVA NO CACHE DO BANCO PARA A PRÓXIMA VEZ SER INSTANTÂNEO!
+                            await db.collection('lid_mapping').doc(numeroRemetente).set({ realNumber: numeroRealEncontrado });
+                            
+                            numeroRemetente = numeroRealEncontrado; 
+                        } else {
+                            console.log(`[ZAP] ⚠️ Cliente '${nomeWhatsapp}' não descoberto (Múltiplos ou Nenhum). Mantendo @lid.`);
+                        }
                     } else {
-                        console.log(`[ZAP] ⚠️ Cliente '${nomeWhatsapp}' não descoberto. Mantendo @lid.`);
+                        console.log(`[ZAP] ⚠️ PushName vazio na Evolution. Não é possível caçar. Mantendo @lid.`);
                     }
-                } catch (e) {
-                    console.log(`[ZAP] Erro na Descoberta:`, e.message);
                 }
+            } catch (e) {
+                console.log(`[ZAP] Erro na Descoberta:`, e.message);
             }
+        }
+        // =========================================================
         }
         // =========================================================
 
