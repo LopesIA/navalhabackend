@@ -996,7 +996,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 batch.update(doc.ref, { lembrete5diasEnviado: true });
                 contadorLembretes++;
             }
-        }
 
         // =====================================================================
         // 2. LEMBRETES DE 1 DIA ANTES (AMANHÃ)
