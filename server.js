@@ -1055,10 +1055,24 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             // C. AGRADECIMENTO (Entre 30 e 60 min DEPOIS do horário marcado)
             else if (minutosFaltando <= -30 && minutosFaltando >= -60 && !ag.agradecimentoEnviado) {
                 console.log(`[CRON] Disparando AGRADECIMENTO para ${ag.clienteNome}`);
-                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do ${ag.barbeiroNome}?`, { link: '#historico' });
-                if (ag.clienteTelefone) {
-                    await enviarWhatsAppCron(ag.clienteTelefone, `⭐ *Muito obrigado!*\n\nFala, ${ag.clienteNome}! Passando para agradecer pela preferência hoje com o *${ag.barbeiroNome}*.\nSe puder, deixe uma avaliação pra gente no App, isso nos ajuda muito! Tamo junto! 🤝`);
+                
+                // Dispara o Push Notification (MANTIDO)
+                if (!ag.clienteUid.startsWith('manual_')) {
+                    sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do ${ag.barbeiroNome}?`, { link: '#historico' });
                 }
+                
+                // Dispara o WhatsApp turbinado com links
+                if (ag.clienteTelefone) {
+                    // 🔥 MÁGICA DO GOOGLE: Pega o nome da Barbearia (ou do barbeiro) e transforma em link de pesquisa
+                    const nomeBuscaGoogle = ag.nomeBarbearia || ag.barbeiroNome || 'Barbearia';
+                    const linkGoogle = `https://www.google.com/search?q=${encodeURIComponent(nomeBuscaGoogle)}`;
+                    
+                    // Texto do WhatsApp formatado com os 2 pedidos
+                    const msgZapAgradecimento = `⭐ *Muito obrigado pela preferência!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer por ter escolhido o profissional *${ag.barbeiroNome}* hoje.\n\nSua opinião é o que nos faz crescer! Poderia nos avaliar rapidinho?\n\n📲 *1. No Aplicativo King Agenda:*\nAcesse: https://kingagenda.site\n_(Passos: Menu > Funções do Cliente > Minhas Atividades > Meu Agendamento > Avaliar)_\n\n🌍 *2. No Google:*\nBasta clicar no link abaixo e nos dar aquelas estrelinhas para ajudar outras pessoas a nos encontrarem:\n${linkGoogle}\n\nVoltando sempre, você acumula pontos! Tamo junto! 🤝`;
+
+                    await enviarWhatsAppCron(ag.clienteTelefone, msgZapAgradecimento);
+                }
+                
                 batch.update(doc.ref, { agradecimentoEnviado: true });
                 contadorLembretes++;
             }
@@ -1597,44 +1611,78 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     try {
         const data = req.body;
         
-        // 1️⃣ A CORREÇÃO DE OURO: Verifica o TIPO do evento ANTES da trava!
+        // 1. Verifica o evento (Apenas mensagens novas)
         const evento = data.event || data.event_type;
-        
-        // Se NÃO for uma nova mensagem chegando (ex: for evento de "mensagem entregue"), ignora!
         if (evento !== "messages.upsert" && evento !== "MESSAGES_UPSERT") {
             return res.status(200).send('IGNORED_EVENT');
         }
 
-        // --- 🛡️ BLINDAGEM ABSOLUTA CONTRA DUPLICATAS (AGORA NO LUGAR CERTO) ---
-        const msgId = data.data?.key?.id || data.data?.id || data.data?.messageId;
-        const textoTrava = data.data?.message?.conversation || data.data?.message?.extendedTextMessage?.text || "sem_texto";
-        const remetenteTrava = data.data?.key?.remoteJid || "desconhecido";
-        
-        const idTrava = msgId || `${remetenteTrava}-${textoTrava.substring(0, 15)}`;
-
-        if (idTrava && mensagensProcessadas.has(idTrava)) {
-            console.log(`[TRAVA ATIVADA] Mensagem duplicada ignorada: ${idTrava}`);
-            return res.status(200).send('DUPLICATE_IGNORED');
-        }
-
-        // Responde a Evolution imediatamente para ela não travar e não reenviar a mesma mensagem
+        // 2. Responde imediatamente para a Evolution não travar e não ficar reenviando
         res.status(200).send('EVENT_RECEIVED');
 
-        if (idTrava) {
-            mensagensProcessadas.add(idTrava);
-            setTimeout(() => mensagensProcessadas.delete(idTrava), 15000); 
-        }
-        // ------------------------------------------------
-
-        const nomeDaInstancia = data.instance || "KingAgenda"; 
-        const mensagem = data.data.message;
-        const key = data.data.key || {};
+        // 3. Extrai dados vitais com segurança
+        const msgInfo = data.data || {};
+        const key = msgInfo.key || {};
         let numeroRemetente = key.remoteJid;
         const fromMe = key.fromMe;
+        const msgId = key.id || msgInfo.id || msgInfo.messageId;
+        const nomeDaInstancia = data.instance || "KingAgenda"; 
 
-        // 🛡️ IGNORA MENSAGENS DE GRUPOS OU STATUS
-        if (numeroRemetente && (numeroRemetente.includes('@g.us') || numeroRemetente.includes('status'))) {
+        // 4. Ignora Status, Grupos e Mensagens do próprio Bot imediatamente
+        if (!numeroRemetente || fromMe || numeroRemetente.includes('@g.us') || numeroRemetente.includes('status')) {
             return;
+        }
+
+        // 5. BLINDAGEM CONTRA DUPLICATAS (Usando apenas o ID único real da mensagem)
+        if (msgId) {
+            if (mensagensProcessadas.has(msgId)) {
+                console.log(`[TRAVA] Mensagem repetida ignorada pela Evolution: ${msgId}`);
+                return;
+            }
+            mensagensProcessadas.add(msgId);
+            setTimeout(() => mensagensProcessadas.delete(msgId), 15000); 
+        }
+
+        // 6. 🚨 DESEMPACOTAR A MENSAGEM (O SEGREDO PARA NÃO PERDER NADA) 🚨
+        let msgObj = msgInfo.message || {};
+        
+        // O WhatsApp esconde as mensagens dependendo da configuração do cliente. Vamos caçar todas:
+        if (msgObj.ephemeralMessage && msgObj.ephemeralMessage.message) {
+            msgObj = msgObj.ephemeralMessage.message; // Mensagens Temporárias ativadas
+        } else if (msgObj.viewOnceMessage && msgObj.viewOnceMessage.message) {
+            msgObj = msgObj.viewOnceMessage.message; // Visualização Única
+        } else if (msgObj.viewOnceMessageV2 && msgObj.viewOnceMessageV2.message) {
+            msgObj = msgObj.viewOnceMessageV2.message; // Visualização Única (V2)
+        } else if (msgObj.documentWithCaptionMessage && msgObj.documentWithCaptionMessage.message) {
+            msgObj = msgObj.documentWithCaptionMessage.message; // Documento com legenda
+        }
+
+        // 7. EXTRAIR O TEXTO DE VERDADE
+        const textoRecebido = 
+            msgObj.conversation || 
+            (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) || 
+            (msgObj.imageMessage && msgObj.imageMessage.caption) || 
+            (msgObj.videoMessage && msgObj.videoMessage.caption) || 
+            "";
+
+        // Se for áudio ou figurinha, não tem texto pra IA ler (evita o bot travar)
+        if (!textoRecebido) {
+            if (msgObj.audioMessage) console.log(`[ZAP] Áudio recebido de ${numeroRemetente} (Ignorado).`);
+            if (msgObj.stickerMessage) console.log(`[ZAP] Figurinha recebida de ${numeroRemetente} (Ignorado).`);
+            return;
+        }
+
+        console.log(`[ZAP] Mensagem capturada de ${numeroRemetente}: "${textoRecebido}"`);
+        
+        // 8. TRATAMENTO DE SEGURANÇA PARA @LID NO BANCO DE DADOS
+        let remoteJidLimpo = numeroRemetente.split('@')[0];
+        if (numeroRemetente.includes('@lid')) {
+            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico para a IA lembrar
+        }
+
+        // FIX MIKAELA
+        if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
+            numeroRemetente = "5527996598623@s.whatsapp.net"; 
         }
 
         // =========================================================
