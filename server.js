@@ -1056,18 +1056,17 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             else if (minutosFaltando <= -30 && minutosFaltando >= -60 && !ag.agradecimentoEnviado) {
                 console.log(`[CRON] Disparando AGRADECIMENTO para ${ag.clienteNome}`);
                 
-                // Dispara o Push Notification (MANTIDO)
+                // Dispara o Push Notification
                 if (!ag.clienteUid.startsWith('manual_')) {
                     sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do ${ag.barbeiroNome}?`, { link: '#historico' });
                 }
                 
                 // Dispara o WhatsApp turbinado com links
                 if (ag.clienteTelefone) {
-                    // 🔥 MÁGICA DO GOOGLE: Pega o nome da Barbearia (ou do barbeiro) e transforma em link de pesquisa
-                    const nomeBuscaGoogle = ag.nomeBarbearia || ag.barbeiroNome || 'Barbearia';
+                    // 🔥 MÁGICA DO GOOGLE: Trava a busca OBRIGATORIAMENTE na palavra "BARBEARIAS"
+                    const nomeBuscaGoogle = "BARBEARIAS";
                     const linkGoogle = `https://www.google.com/search?q=${encodeURIComponent(nomeBuscaGoogle)}`;
                     
-                    // Texto do WhatsApp formatado com os 2 pedidos
                     const msgZapAgradecimento = `⭐ *Muito obrigado pela preferência!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer por ter escolhido o profissional *${ag.barbeiroNome}* hoje.\n\nSua opinião é o que nos faz crescer! Poderia nos avaliar rapidinho?\n\n📲 *1. No Aplicativo King Agenda:*\nAcesse: https://kingagenda.site\n_(Passos: Menu > Funções do Cliente > Minhas Atividades > Meu Agendamento > Avaliar)_\n\n🌍 *2. No Google:*\nBasta clicar no link abaixo e nos dar aquelas estrelinhas para ajudar outras pessoas a nos encontrarem:\n${linkGoogle}\n\nVoltando sempre, você acumula pontos! Tamo junto! 🤝`;
 
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZapAgradecimento);
@@ -2172,14 +2171,13 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                             } catch (e) { functionResult = { erro: e.message }; }
                         }
 
-                        // === 2. CONSULTAR DISPONIBILIDADE (MOTOR MATEMÁTICO AVANÇADO) ===
+                        // === 2. CONSULTAR DISPONIBILIDADE (MOTOR MATEMÁTICO DOMINÓ) ===
                         else if (fnName === "consultar_disponibilidade") {
                             try {
                                 const allUsers = await db.collection('usuarios').get();
                                 let barbeiroEncontrado = null;
                                 const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-                                // 1. Encontra o UID do Barbeiro
                                 allUsers.forEach(doc => {
                                     const d = doc.data();
                                     const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
@@ -2194,23 +2192,19 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                 if (!barbeiroEncontrado) {
                                     functionResult = { erro: "Profissional não encontrado." };
                                 } else {
-                                    // 2. Extrai Regras do Expediente do Barbeiro
                                     let inicioExp = timeToMin(barbeiroEncontrado.horarioInicio || "08:00");
                                     let fimExp = timeToMin(barbeiroEncontrado.horarioFim || "20:00");
                                     let almocoIn = timeToMin(barbeiroEncontrado.almocoInicio || "12:00");
                                     let almocoOut = timeToMin(barbeiroEncontrado.almocoFim || "13:00");
                                     if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
                                     
-                                    // 3. HIERARQUIA DE AGENDA (A mágica do Fallback)
                                     let usaAgendaManual = barbeiroEncontrado.usaAgendaManual === true;
-                                    let agendaDoDia = barbeiroEncontrado.agenda || {}; // REGRA PADRÃO (Agenda Normal)
+                                    let agendaDoDia = barbeiroEncontrado.agenda || {}; 
 
                                     try {
-                                        // Tenta buscar a exceção do dia (Agenda Diária)
                                         const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiroEncontrado.uid).collection('agenda_diaria').doc(fnArgs.data).get();
                                         if (agendaDiariaDoc.exists) {
                                             const dadosDiarios = agendaDiariaDoc.data();
-                                            // Se tiver a diária, ela sobrepõe a normal na hora!
                                             if (dadosDiarios.horarios && Object.keys(dadosDiarios.horarios).length > 0) {
                                                 agendaDoDia = dadosDiarios.horarios;
                                                 usaAgendaManual = true; 
@@ -2219,11 +2213,8 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                                 usaAgendaManual = true;
                                             }
                                         }
-                                    } catch (e) {
-                                        console.log("[IA] Sem agenda_diaria especial, usando agenda normal/expediente base.");
-                                    }
+                                    } catch (e) {}
 
-                                    // 4. BUSCA TODOS OS AGENDAMENTOS DO DIA PARA CÁLCULO DE ACAVALAMENTO
                                     const agSnap = await db.collection('agendamentos')
                                         .where('barbeiroUid', '==', barbeiroEncontrado.uid)
                                         .where('data', '==', fnArgs.data)
@@ -2234,55 +2225,77 @@ const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
                                     agSnap.forEach(doc => {
                                         const ag = doc.data();
                                         let inicio = timeToMin(ag.horario);
-                                        // Puxa a duração exata do banco. Se por algum motivo não tiver, assume 30min padrão
                                         let duracao = ag.duracao ? Number(ag.duracao) : 30; 
                                         let fim = inicio + duracao;
                                         ocupados.push({ inicio, fim, servico: ag.servico });
                                     });
 
-                                    // 5. Filtro de Tempo Real (Não sugerir horas do passado hoje)
+                                    // 💡 A MÁGICA: Odena os ocupados do mais cedo pro mais tarde
+                                    ocupados.sort((a, b) => a.inicio - b.inicio);
+
                                     const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
                                     const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
                                     const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
 
                                     let horariosLivres = [];
+                                    const duracaoPadrao = barbeiroEncontrado.intervaloAtendimento ? Number(barbeiroEncontrado.intervaloAtendimento) : 30;
                                     
-                                    // 6. MOTOR DE VARREDURA E COLISÃO CIRÚRGICA (De 30 em 30 min)
-                                    for (let i = inicioExp; i <= fimExp - 30; i += 30) {
+                                    // 💡 O CURSOR DESLIZANTE
+                                    let cursor = inicioExp;
+
+                                    while (cursor <= fimExp - duracaoPadrao) {
                                         // A. O horário já passou?
-                                        if (isToday && i <= agoraMin) continue;
-
-                                        // B. Horário de almoço padrão (Só aplica se NÃO estiver usando agenda manual)
-                                        if (!usaAgendaManual && almocoIn !== -1 && i >= almocoIn && i < almocoOut) continue;
-
-                                        const horaFormatada = minToTime(i);
-
-                                        // C. Verificação da Agenda Manual / Diária
-                                        if (usaAgendaManual) {
-                                            const statusSlot = agendaDoDia[horaFormatada];
-                                            // Se o barbeiro desligou o botãozinho desse horário (false), a IA pula
-                                            if (statusSlot === false || String(statusSlot).toLowerCase() === "false" || String(statusSlot).toLowerCase() === "ocupado") {
-                                                continue;
-                                            }
+                                        if (isToday && cursor <= agoraMin) {
+                                            cursor += duracaoPadrao;
+                                            continue;
                                         }
 
-                                        // D. CÁLCULO ANTI-ACAVALAMENTO 
-                                        // Testamos se este slot (ex: das 10:00 às 10:30) bate com algum agendamento existente
-                                        let slotFim = i + 30; // Simulamos que o cliente quer pelo menos um bloco de 30min
-                                        let temConflito = false;
+                                        // B. Horário de almoço padrão
+                                        if (!usaAgendaManual && almocoIn !== -1 && cursor >= almocoIn && cursor < almocoOut) {
+                                            cursor = almocoOut;
+                                            continue;
+                                        }
+
+                                        // C. CÁLCULO ANTI-ACAVALAMENTO COM PULO INTELIGENTE
+                                        let colidiu = false;
+                                        let salto = 0;
+                                        let slotFim = cursor + duracaoPadrao;
                                         
                                         for (const oc of ocupados) {
-                                            // Fórmula matemática exata para interseção de tempo (Overlap)
-                                            if (i < oc.fim && slotFim > oc.inicio) {
-                                                temConflito = true;
+                                            if (cursor < oc.fim && slotFim > oc.inicio) {
+                                                colidiu = true;
+                                                salto = oc.fim; // Se bateu, desliza o cursor exatamente para o FIM do serviço (Ex: 18:40)
                                                 break;
                                             }
                                         }
 
-                                        // Se sobreviveu a todos os filtros e não encavalou com ninguém, está LIVRE!
-                                        if (!temConflito) {
+                                        if (colidiu) {
+                                            cursor = salto;
+                                            continue;
+                                        }
+
+                                        const horaFormatada = minToTime(cursor);
+
+                                        // D. Verificação da Agenda Manual
+                                        if (usaAgendaManual) {
+                                            const statusSlot = agendaDoDia[horaFormatada];
+                                            if (statusSlot === false || String(statusSlot).toLowerCase() === "false" || String(statusSlot).toLowerCase() === "ocupado") {
+                                                cursor += duracaoPadrao;
+                                                continue;
+                                            }
+                                        }
+
+                                        // E. Verifica se cabe no "buraco" antes do próximo
+                                        let proximoObstaculo = fimExp;
+                                        const proxBlk = ocupados.find(b => b.inicio > cursor);
+                                        if (proxBlk && proxBlk.inicio < proximoObstaculo) proximoObstaculo = proxBlk.inicio;
+                                        if (!usaAgendaManual && almocoIn !== -1 && cursor < almocoIn && almocoIn < proximoObstaculo) proximoObstaculo = almocoIn;
+
+                                        if ((proximoObstaculo - cursor) >= duracaoPadrao) {
                                             horariosLivres.push(horaFormatada);
                                         }
+
+                                        cursor += duracaoPadrao;
                                     }
 
                                     if (horariosLivres.length > 0) {
