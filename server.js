@@ -996,6 +996,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 batch.update(doc.ref, { lembrete5diasEnviado: true });
                 contadorLembretes++;
             }
+        }
 
         // =====================================================================
         // 2. LEMBRETES DE 1 DIA ANTES (AMANHÃ)
@@ -1616,7 +1617,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             return res.status(200).send('IGNORED_EVENT');
         }
 
-        // 2. Responde imediatamente para a Evolution não travar e não ficar reenviando
+        // 2. Responde imediatamente para a Evolution não travar
         res.status(200).send('EVENT_RECEIVED');
 
         // 3. Extrai dados vitais com segurança
@@ -1632,7 +1633,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             return;
         }
 
-        // 5. BLINDAGEM CONTRA DUPLICATAS (Usando apenas o ID único real da mensagem)
+        // 5. BLINDAGEM CONTRA DUPLICATAS 
         if (msgId) {
             if (mensagensProcessadas.has(msgId)) {
                 console.log(`[TRAVA] Mensagem repetida ignorada pela Evolution: ${msgId}`);
@@ -1642,18 +1643,17 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             setTimeout(() => mensagensProcessadas.delete(msgId), 15000); 
         }
 
-        // 6. 🚨 DESEMPACOTAR A MENSAGEM (O SEGREDO PARA NÃO PERDER NADA) 🚨
+        // 6. 🚨 DESEMPACOTAR A MENSAGEM (O SEGREDO DAS MSG TEMPORÁRIAS) 🚨
         let msgObj = msgInfo.message || {};
         
-        // O WhatsApp esconde as mensagens dependendo da configuração do cliente. Vamos caçar todas:
         if (msgObj.ephemeralMessage && msgObj.ephemeralMessage.message) {
-            msgObj = msgObj.ephemeralMessage.message; // Mensagens Temporárias ativadas
+            msgObj = msgObj.ephemeralMessage.message; 
         } else if (msgObj.viewOnceMessage && msgObj.viewOnceMessage.message) {
-            msgObj = msgObj.viewOnceMessage.message; // Visualização Única
+            msgObj = msgObj.viewOnceMessage.message; 
         } else if (msgObj.viewOnceMessageV2 && msgObj.viewOnceMessageV2.message) {
-            msgObj = msgObj.viewOnceMessageV2.message; // Visualização Única (V2)
+            msgObj = msgObj.viewOnceMessageV2.message; 
         } else if (msgObj.documentWithCaptionMessage && msgObj.documentWithCaptionMessage.message) {
-            msgObj = msgObj.documentWithCaptionMessage.message; // Documento com legenda
+            msgObj = msgObj.documentWithCaptionMessage.message; 
         }
 
         // 7. EXTRAIR O TEXTO DE VERDADE
@@ -1664,28 +1664,20 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             (msgObj.videoMessage && msgObj.videoMessage.caption) || 
             "";
 
-        // Se for áudio ou figurinha, não tem texto pra IA ler (evita o bot travar)
+        // Se for áudio ou figurinha, ignora sem quebrar o servidor
         if (!textoRecebido) {
-            if (msgObj.audioMessage) console.log(`[ZAP] Áudio recebido de ${numeroRemetente} (Ignorado).`);
-            if (msgObj.stickerMessage) console.log(`[ZAP] Figurinha recebida de ${numeroRemetente} (Ignorado).`);
             return;
         }
 
-        console.log(`[ZAP] Mensagem capturada de ${numeroRemetente}: "${textoRecebido}"`);
+        console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
         
-        // 8. TRATAMENTO DE SEGURANÇA PARA @LID NO BANCO DE DADOS
-        let remoteJidLimpo = numeroRemetente.split('@')[0];
-        if (numeroRemetente.includes('@lid')) {
-            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico para a IA lembrar
-        }
-
-        // FIX MIKAELA
+        // 8. FIX MIKAELA
         if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
             numeroRemetente = "5527996598623@s.whatsapp.net"; 
         }
 
         // =========================================================
-        // 🕵️‍♂️ MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
+        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
         // =========================================================
         if (numeroRemetente && numeroRemetente.includes('@lid')) {
             const nomeWhatsapp = data.data?.pushName;
@@ -1728,30 +1720,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         }
         // =========================================================
 
-        // 🔥 A SEGUNDA CORREÇÃO DE OURO ESTÁ AQUI 🔥
-        // Apagamos aquele IF antigo que matava o processo caso fosse @lid. 
-        // Agora, se o número for @lid e a máquina não descobrir de quem é, 
-        // a IA VAI RESPONDER mesmo assim usando o checkNumber=false na Evolution!
-
-        // FIX MIKAELA
-        if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-            numeroRemetente = "5527996598623@s.whatsapp.net"; 
-        }
-
-        const textoRecebido =
-            mensagem.conversation ||
-            mensagem.extendedTextMessage?.text ||
-            mensagem.imageMessage?.caption || "";
-
-        if (!textoRecebido || fromMe) return; 
-
-        console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
-        
-        // 🛡️ TRATAMENTO DE SEGURANÇA PARA @LID NO BANCO DE DADOS
+        // 10. TRATAMENTO DE SEGURANÇA PARA O BANCO DE DADOS (Rodado DEPOIS da descoberta)
         let remoteJidLimpo = numeroRemetente.split('@')[0];
         if (numeroRemetente.includes('@lid')) {
-            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico para a IA lembrar
+            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico
         }
+
 
             // ============================================================
             // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA
