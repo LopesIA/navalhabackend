@@ -1750,9 +1750,10 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             let equipeNomes = [];
             let equipePorBarbearia = {}; 
             let tabelaServicosPorBarbearia = {}; 
-            let telefonePorBarbearia = {}; // 👈 NOVO: Guarda o telefone do dono de cada unidade
+            let telefonePorBarbearia = {}; 
 
             try {
+                // Descobre quem está mandando a mensagem
                 const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
                 if (!userSnap.empty) {
                     const uData = userSnap.docs[0].data();
@@ -1767,37 +1768,76 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                     }
                 }
 
-                // 🏢 BUSCA A EQUIPE E PUXA OS SERVIÇOS/TELEFONE DO DONO DE CADA UNIDADE
+                // 🏢 BUSCA A EQUIPE BASEADA NO DOCUMENTO DO DONO (A MÁGICA DA CORREÇÃO)
                 const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
                 let cacheDonos = {};
 
                 for (const doc of equipeSnap.docs) {
                     const d = doc.data();
                     if (d.nome) {
-                        if (isProprietario) equipeNomes.push(d.nome); 
+                        // 1. Descobre quem é o Dono desta pessoa
+                        let uidDoDono = d.donoUid || d.vinculoSalao || (d.pertenceABarbearia ? d.pertenceABarbearia.uid : null) || doc.id; 
                         
-                        const barbeariaAtual = d.nomeBarbearia || "Barbearia King"; 
-                        if (!equipePorBarbearia[barbeariaAtual]) {
-                            equipePorBarbearia[barbeariaAtual] = [];
+                        // 2. Busca e faz o Cache dos dados reais do DONO
+                        if (!cacheDonos[uidDoDono]) {
+                            const donoDoc = await db.collection('usuarios').doc(uidDoDono).get();
+                            if (donoDoc.exists) {
+                                cacheDonos[uidDoDono] = donoDoc.data();
+                            } else {
+                                cacheDonos[uidDoDono] = d; // Fallback de segurança
+                            }
                         }
-                        equipePorBarbearia[barbeariaAtual].push(d.nome);
 
-                        // 🎯 A MÁGICA: Busca os serviços e o TELEFONE do donoUid!
-                        let uidDoDono = d.donoUid || doc.id; 
-                        
-                        if (!tabelaServicosPorBarbearia[barbeariaAtual]) {
-                            if (!cacheDonos[uidDoDono]) {
-                                const donoDoc = await db.collection('usuarios').doc(uidDoDono).get();
-                                if (donoDoc.exists) {
-                                    cacheDonos[uidDoDono] = donoDoc.data(); // Guarda tudo do dono
-                                } else {
-                                    cacheDonos[uidDoDono] = {};
+                        const dadosDono = cacheDonos[uidDoDono];
+                        const barbeariaAtual = dadosDono.nomeBarbearia || d.nomeBarbearia || "Barbearia King"; 
+
+                        // 3. Lê o array "equipe" DE DENTRO do documento do Dono!
+                        if (!equipePorBarbearia[barbeariaAtual]) {
+                            let nomesEquipeTemp = new Set(); // O Set evita nomes duplicados na IA
+                            
+                            // O dono sempre faz parte da equipe
+                            if (dadosDono.nome) nomesEquipeTemp.add(dadosDono.nome);
+
+                            // Varredura no array de equipe do dono
+                            if (dadosDono.equipe && Array.isArray(dadosDono.equipe)) {
+                                for (const membro of dadosDono.equipe) {
+                                    let nomeMembroAdicionar = "";
+                                    
+                                    // O banco pode ter salvo como um objeto {uid, nome} ou só a string do UID
+                                    if (typeof membro === 'object' && membro.nome) {
+                                        nomeMembroAdicionar = membro.nome;
+                                    } else {
+                                        let uidMembro = typeof membro === 'object' ? membro.uid : membro;
+                                        if (uidMembro) {
+                                            try {
+                                                // Vai no banco caçar o nome pelo UID
+                                                const mDoc = await db.collection('usuarios').doc(uidMembro).get();
+                                                if (mDoc.exists && mDoc.data().nome) {
+                                                    nomeMembroAdicionar = mDoc.data().nome;
+                                                }
+                                            } catch(e) {
+                                                console.log("Erro ao caçar nome do membro:", e.message);
+                                            }
+                                        }
+                                    }
+
+                                    if (nomeMembroAdicionar) {
+                                        nomesEquipeTemp.add(nomeMembroAdicionar);
+                                        // Se quem está falando com o bot for o dono, alimenta a variável interna dele
+                                        if (isProprietario && uidDoDono === meuUid) {
+                                            equipeNomes.push(nomeMembroAdicionar);
+                                        }
+                                    }
                                 }
                             }
-                            tabelaServicosPorBarbearia[barbeariaAtual] = cacheDonos[uidDoDono].listaServicos || [];
                             
-                            // Pega o telefone e limpa o @s.whatsapp.net pra ficar só os números!
-                            let telDono = cacheDonos[uidDoDono].telefone || "";
+                            // Converte de volta para Array para ficar legível
+                            equipePorBarbearia[barbeariaAtual] = Array.from(nomesEquipeTemp);
+
+                            // 4. Puxa Serviços e Telefone do Dono
+                            tabelaServicosPorBarbearia[barbeariaAtual] = dadosDono.listaServicos || [];
+                            
+                            let telDono = dadosDono.telefone || "";
                             if (telDono.includes('@')) telDono = telDono.split('@')[0];
                             telefonePorBarbearia[barbeariaAtual] = telDono || "Número não informado";
                         }
@@ -1991,7 +2031,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 REGRAS DE OURO E ATALHOS:
                 1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
                 2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
-                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NÚMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
+                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NÚMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade que fica no dado "telefone" do usuario que que é o dono ou seja busque no dado "donoUid" o id e depois procure o dado "telefone"] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
                 4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.
                 5. PROIBIDO EMENDAR FUNÇÕES: Após usar a ferramenta "consultar_disponibilidade", você é OBRIGADA a responder ao cliente com uma mensagem de texto (fazendo o Resumo do Passo 7). NUNCA chame a função "criar_agendamento" sem que o cliente tenha digitado "SIM".
                 6. O ATALHO DO CLIENTE APRESSADO: Se o cliente já informar a data E o horário exatos, faça a consulta de disponibilidade em silêncio. Se o horário que ele pediu estiver na lista de livres, vá direto para o Passo 7 (Resumo). Se não estiver livre, mostre-lhe a lista de horários disponíveis.` }]
