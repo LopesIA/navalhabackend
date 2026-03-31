@@ -1732,10 +1732,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                 console.log(`[ZAP] Erro na Descoberta:`, e.message);
             }
         }
-        // =========================================================
-        }
-        // =========================================================
-
+        
         // 10. TRATAMENTO DE SEGURANÇA PARA O BANCO DE DADOS (Rodado DEPOIS da descoberta)
         let remoteJidLimpo = numeroRemetente.split('@')[0];
         if (numeroRemetente.includes('@lid')) {
