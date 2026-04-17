@@ -935,7 +935,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
             numeroLimpo = destino.replace(/[^0-9]/g, ''); // Tira traços e espaços
-            // Adiciona o 55 se o número tiver apenas 10 ou 11 dígitos
             if (numeroLimpo.length === 10 || numeroLimpo.length === 11) {
                 numeroLimpo = '55' + numeroLimpo;
             }
@@ -955,6 +954,26 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         } catch (e) {
             console.error("[CRON ZAP] Erro no fetch:", e.message);
         }
+    };
+
+    // 🛡️ TRAVA DE SEGURANÇA: BUSCA O NOME CORRETO SE ESTIVER UNDEFINED
+    const obterNomeProfissionalSeguro = async (ag) => {
+        let nome = ag.barbeiroNome;
+        // Verifica se está quebrado, nulo, vazio ou "undefined"
+        if (!nome || String(nome).toLowerCase() === "undefined" || String(nome).toLowerCase() === "null" || nome.trim() === "") {
+            try {
+                if (ag.barbeiroUid) {
+                    const bDoc = await db.collection('usuarios').doc(ag.barbeiroUid).get();
+                    if (bDoc.exists && bDoc.data().nome) {
+                        return bDoc.data().nome; // Retorna o nome real do banco
+                    }
+                }
+            } catch (e) {
+                console.error("Erro ao resgatar nome do profissional:", e.message);
+            }
+            return "o(a) profissional"; // Fallback amigável caso tudo falhe
+        }
+        return nome; // Se estiver ok, retorna o nome normal
     };
 
     // --- MÁQUINA DO TEMPO (DATAS) ---
@@ -988,10 +1007,12 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         for (const doc of snap5Dias.docs) {
             const ag = doc.data();
             if (!ag.lembrete5diasEnviado) {
+                const nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag); // Nome Blindado!
+                
                 console.log(`[CRON] Disparando 5 DIAS para ${ag.clienteNome}`);
-                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '📅 Falta pouco!', `Faltam 5 dias para o seu horário com ${ag.barbeiroNome}.`, { link: '#historico' });
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '📅 Falta pouco!', `Faltam 5 dias para o seu horário com ${nomeBarbeiroSeguro}.`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    await enviarWhatsAppCron(ag.clienteTelefone, `📅 *Faltam 5 dias!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para avisar que o seu agendamento de *${ag.servico}* com *${ag.barbeiroNome}* será no dia ${ag.data.split('-').reverse().join('/')} às ${ag.horario}.\nJá estamos nos preparando para te receber! ✂️`);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `📅 *Faltam 5 dias!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nPassando para avisar que o seu agendamento de *${ag.servico}* com *${nomeBarbeiroSeguro}* será no dia ${ag.data.split('-').reverse().join('/')} às ${ag.horario}.\nJá estamos nos preparando para te receber! ✂️`);
                 }
                 batch.update(doc.ref, { lembrete5diasEnviado: true });
                 contadorLembretes++;
@@ -1005,10 +1026,12 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         for (const doc of snapAmanha.docs) {
             const ag = doc.data();
             if (!ag.lembrete1diaEnviado) {
+                const nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag); // Nome Blindado!
+
                 console.log(`[CRON] Disparando 1 DIA para ${ag.clienteNome}`);
-                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ É amanhã!', `Seu horário com ${ag.barbeiroNome} é amanhã às ${ag.horario}.`, { link: '#historico' });
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ É amanhã!', `Seu horário com ${nomeBarbeiroSeguro} é amanhã às ${ag.horario}.`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *É amanhã!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nLembrando que o seu horário com *${ag.barbeiroNome}* é amanhã às ${ag.horario}.\nSe precisar reagendar, por favor nos avise pelo app! 💈`);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *É amanhã!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nLembrando que o seu horário com *${nomeBarbeiroSeguro}* é amanhã às ${ag.horario}.\nSe precisar reagendar, por favor nos avise pelo app! 💈`);
                 }
                 batch.update(doc.ref, { lembrete1diaEnviado: true });
                 contadorLembretes++;
@@ -1027,15 +1050,18 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             const horaAgendamento = new Date(agoraBrasil);
             horaAgendamento.setHours(horas, minutos, 0, 0);
 
-            // Calcula minutos (Positivo = Futuro | Negativo = Passado)
             const minutosFaltando = Math.floor((horaAgendamento.getTime() - agoraBrasil.getTime()) / 60000);
+            
+            // Só chama a função de blindagem se for precisar enviar a mensagem
+            let nomeBarbeiroSeguro = ""; 
 
             // A. LEMBRETE DE 1 HORA (Entre 45 e 65 min antes)
             if (minutosFaltando <= 65 && minutosFaltando >= 45 && !ag.lembrete1hEnviado) {
+                nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag);
                 console.log(`[CRON] Disparando 1H para ${ag.clienteNome}`);
-                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${ag.barbeiroNome} é hoje às ${ag.horario}.`, { link: '#historico' });
+                if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '⏰ Falta 1 hora!', `Seu horário com ${nomeBarbeiroSeguro} é hoje às ${ag.horario}.`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *Falta 1 Hora!*\n\nOlá, ${ag.clienteNome}!\nSeu horário de *${ag.servico}* com *${ag.barbeiroNome}* é daqui a pouco, às ${ag.horario}.\nTe esperamos lá! ✂️`);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `⏰ *Falta 1 Hora!*\n\nOlá, ${ag.clienteNome || 'Cliente'}!\nSeu horário de *${ag.servico}* com *${nomeBarbeiroSeguro}* é daqui a pouco, às ${ag.horario}.\nTe esperamos lá! ✂️`);
                 }
                 batch.update(doc.ref, { lembrete1hEnviado: true });
                 contadorLembretes++;
@@ -1043,10 +1069,11 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
             // B. LEMBRETE DE 20 MINUTOS (Entre 5 e 25 min antes)
             else if (minutosFaltando <= 25 && minutosFaltando >= 5 && !ag.lembrete20minEnviado) {
+                nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag);
                 console.log(`[CRON] Disparando 20MIN para ${ag.clienteNome}`);
                 if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '🚀 É daqui a pouco!', `Seu corte é em 20 minutos!`, { link: '#historico' });
                 if (ag.clienteTelefone) {
-                    await enviarWhatsAppCron(ag.clienteTelefone, `🚀 *É daqui a pouco!*\n\n${ag.clienteNome}, o seu horário com *${ag.barbeiroNome}* começa em 20 minutos!`);
+                    await enviarWhatsAppCron(ag.clienteTelefone, `🚀 *É daqui a pouco!*\n\n${ag.clienteNome || 'Cliente'}, o seu horário com *${nomeBarbeiroSeguro}* começa em 20 minutos!`);
                 }
                 batch.update(doc.ref, { lembrete20minEnviado: true, lembrete10minEnviado: true });
                 contadorLembretes++;
@@ -1054,20 +1081,18 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
             // C. AGRADECIMENTO (Entre 30 e 60 min DEPOIS do horário marcado)
             else if (minutosFaltando <= -30 && minutosFaltando >= -60 && !ag.agradecimentoEnviado) {
+                nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag);
                 console.log(`[CRON] Disparando AGRADECIMENTO para ${ag.clienteNome}`);
                 
-                // Dispara o Push Notification
                 if (!ag.clienteUid.startsWith('manual_')) {
-                    sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do ${ag.barbeiroNome}?`, { link: '#historico' });
+                    sendNotification(ag.clienteUid, '⭐ O que achou?', `Muito obrigado pela preferência! Que tal avaliar o serviço do(a) ${nomeBarbeiroSeguro}?`, { link: '#historico' });
                 }
                 
-                // Dispara o WhatsApp turbinado com links
                 if (ag.clienteTelefone) {
-                    // 🔥 MÁGICA DO GOOGLE: Trava a busca OBRIGATORIAMENTE na palavra "BARBEARIAS"
                     const nomeBuscaGoogle = "BARBEARIAS";
                     const linkGoogle = `https://www.google.com/search?q=${encodeURIComponent(nomeBuscaGoogle)}`;
                     
-                    const msgZapAgradecimento = `⭐ *Muito obrigado pela preferência!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer por ter escolhido o profissional *${ag.barbeiroNome}* hoje.\n\nSua opinião é o que nos faz crescer! Poderia nos avaliar rapidinho?\n\n📲 *1. No Aplicativo King Agenda:*\nAcesse: https://kingagenda.site\n_(Passos: Menu > Funções do Cliente > Minhas Atividades > Meu Agendamento > Avaliar)_\n\n🌍 *2. No Google:*\nBasta clicar no link abaixo e nos dar aquelas estrelinhas para ajudar outras pessoas a nos encontrarem:\n${linkGoogle}\n\nVoltando sempre, você acumula pontos! Tamo junto! 🤝`;
+                    const msgZapAgradecimento = `⭐ *Muito obrigado pela preferência!*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Passando para agradecer por ter escolhido o profissional *${nomeBarbeiroSeguro}* hoje.\n\nSua opinião é o que nos faz crescer! Poderia nos avaliar rapidinho?\n\n📲 *1. No Aplicativo King Agenda:*\nAcesse: https://kingagenda.site\n_(Passos: Menu > Funções do Cliente > Minhas Atividades > Meu Agendamento > Avaliar)_\n\n🌍 *2. No Google:*\nBasta clicar no link abaixo e nos dar aquelas estrelinhas para ajudar outras pessoas a nos encontrarem:\n${linkGoogle}\n\nVoltando sempre, você acumula pontos! Tamo junto! 🤝`;
 
                     await enviarWhatsAppCron(ag.clienteTelefone, msgZapAgradecimento);
                 }
@@ -1095,18 +1120,15 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         for (const doc of agendamentosAntigos.docs) {
             const ag = doc.data();
 
-            // Pula se já enviamos lembrete de ausência para esse agendamento
             if (ag.lembreteAusenciaEnviado) continue;
 
             const isManual = !ag.clienteUid || ag.clienteUid.startsWith('manual_');
 
-            // Se for manual e não tiver telefone, não tem como enviar Zap nem checar retorno, então pula e mata o doc.
             if (isManual && !ag.clienteTelefone) {
                 batch.update(doc.ref, { lembreteAusenciaEnviado: true });
                 continue;
             }
 
-            // Controle para não mandar 2x pro mesmo cliente no mesmo loop
             if (isManual) {
                 if (telefonesAnalisados.has(ag.clienteTelefone)) continue;
                 telefonesAnalisados.add(ag.clienteTelefone);
@@ -1115,7 +1137,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 uidsAnalisados.add(ag.clienteUid);
             }
 
-            // 🛡️ VALIDAÇÃO DE SEGURANÇA: Voltou nos últimos 25 dias?
             let queryRecente;
             if (isManual) {
                 queryRecente = db.collection('agendamentos').where('clienteTelefone', '==', ag.clienteTelefone);
@@ -1134,21 +1155,17 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
                 }
             });
 
-            // Se ele tem agendamento recente, ou o serviço velho não for concluído/avaliado:
             if (temAgendamentoRecente || (ag.status !== 'concluido' && ag.status !== 'avaliado')) {
                 batch.update(doc.ref, { lembreteAusenciaEnviado: true }); 
                 continue; 
             }
 
-            // 🎯 ACHOU UM CLIENTE SUMIDO VÁLIDO! Envia a mensagem:
             console.log(`[CRON] Disparando RETENÇÃO para: ${ag.clienteNome}`);
             
-            // Só manda Push se tiver App
             if (!isManual) {
                 sendNotification(ag.clienteUid, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
             }
             
-            // Manda o ZAP (pra App ou Manual)
             if (ag.clienteTelefone) {
                 const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
                 await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
@@ -1157,7 +1174,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             batch.update(doc.ref, { lembreteAusenciaEnviado: true });
             contadorRetencao++;
             
-            // 🔥 QUEBRA O LOOP IMEDIATAMENTE (ENVIA SÓ PRA 1)!
             break; 
         }
 
