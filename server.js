@@ -1620,8 +1620,14 @@ app.post('/api/chat-visagista', async (req, res) => {
 });
 // =================================================================
 
+// =================================================================
+// 🛡️ MEMÓRIA TEMPORÁRIA CONTRA DUPLICIDADES DE WEBHOOK (15 SEGUNDOS)
+// =================================================================
 const mensagensProcessadas = new Set();
 
+// =================================================================
+// 🤖 WEBHOOK ATUALIZADO: APENAS DIRECIONAMENTO E RESPOSTA FIXA
+// =================================================================
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
     try {
         const data = req.body;
@@ -1632,7 +1638,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             return res.status(200).send('IGNORED_EVENT');
         }
 
-        // 2. Responde imediatamente para a Evolution não travar
+        // 2. Responde imediatamente para a Evolution não travar o fluxo
         res.status(200).send('EVENT_RECEIVED');
 
         // 3. Extrai dados vitais com segurança
@@ -1648,19 +1654,18 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             return;
         }
 
-        // 5. BLINDAGEM CONTRA DUPLICATAS 
+        // 5. BLINDAGEM CONTRA DUPLICATAS DE WEBHOOK REPETIDO
         if (msgId) {
             if (mensagensProcessadas.has(msgId)) {
-                console.log(`[TRAVA] Mensagem repetida ignorada pela Evolution: ${msgId}`);
+                console.log(`[TRAVA] Mensagem repetida ignorada no Webhook: ${msgId}`);
                 return;
             }
             mensagensProcessadas.add(msgId);
             setTimeout(() => mensagensProcessadas.delete(msgId), 15000); 
         }
 
-        // 6. 🚨 DESEMPACOTAR A MENSAGEM (O SEGREDO DAS MSG TEMPORÁRIAS) 🚨
+        // 6. DESEMPACOTAR A MENSAGEM (O SEGREDO DAS MSG TEMPORÁRIAS)
         let msgObj = msgInfo.message || {};
-        
         if (msgObj.ephemeralMessage && msgObj.ephemeralMessage.message) {
             msgObj = msgObj.ephemeralMessage.message; 
         } else if (msgObj.viewOnceMessage && msgObj.viewOnceMessage.message) {
@@ -1679,12 +1684,8 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             (msgObj.videoMessage && msgObj.videoMessage.caption) || 
             "";
 
-        // Se for áudio ou figurinha, ignora sem quebrar o servidor
-        if (!textoRecebido) {
-            return;
-        }
-
-        console.log(`[ZAP] Mensagem de ${numeroRemetente}: "${textoRecebido}"`);
+        // Se for áudio, mídia sem legenda ou figurinha, processa a resposta padrão mesmo assim
+        console.log(`[ZAP] Mensagem recebida de ${numeroRemetente}`);
         
         // 8. FIX MIKAELA
         if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
@@ -1692,20 +1693,16 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         }
 
         // =========================================================
-        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL (COM CACHE)
+        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
         // =========================================================
         if (numeroRemetente && numeroRemetente.includes('@lid')) {
             try {
                 const cacheLid = await db.collection('lid_mapping').doc(numeroRemetente).get();
                 if (cacheLid.exists) {
                     numeroRemetente = cacheLid.data().realNumber;
-                    console.log(`[ZAP] 🎯 Fantasma já conhecido no Cache! Número real: ${numeroRemetente}`);
                 } else {
                     const nomeWhatsapp = data.data?.pushName || msgInfo?.pushName || data.sender?.name || data.sender?.pushName;
-                    
                     if (nomeWhatsapp) {
-                        console.log(`[ZAP] 👻 Fantasma novo detectado! Nome: ${nomeWhatsapp}. Vasculhando banco...`);
-                        
                         let usuariosEncontrados = [];
                         const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                         
@@ -1715,13 +1712,12 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             if (u.telefone && u.nome) {
                                 const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                                 if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
-                                    usuariosEncontrados.push(u); // Guarda os dados inteiros
+                                    usuariosEncontrados.push(u);
                                 }
                             }
                         });
 
                         if (usuariosEncontrados.length > 0) {
-                            // SE ACHAR MÚLTIPLOS, FILTRA QUEM É CLIENTE PARA NÃO DAR ERRO! SE NÃO ACHAR, PEGA O PRIMEIRO.
                             let alvo = usuariosEncontrados.length === 1 ? usuariosEncontrados[0] : usuariosEncontrados.find(u => u.tipo === 'cliente');
                             if (!alvo) alvo = usuariosEncontrados[0]; 
 
@@ -1731,1327 +1727,184 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
                             }
                             numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
                             
-                            console.log(`[ZAP] 🎯 Descoberta forçada com sucesso! O número de ${nomeWhatsapp} é ${numeroRealEncontrado}`);
-                            
                             await db.collection('lid_mapping').doc(numeroRemetente).set({ realNumber: numeroRealEncontrado });
                             numeroRemetente = numeroRealEncontrado; 
-                        } else {
-                            console.log(`[ZAP] ⚠️ Cliente '${nomeWhatsapp}' não descoberto. Mantendo @lid.`);
                         }
                     }
                 }
             } catch (e) {
-                console.log(`[ZAP] Erro na Descoberta:`, e.message);
+                console.log(`[ZAP] Erro na Descoberta de Número:`, e.message);
             }
         }
-        
-        // 10. TRATAMENTO DE SEGURANÇA PARA O BANCO DE DADOS (Rodado DEPOIS da descoberta)
-        let remoteJidLimpo = numeroRemetente.split('@')[0];
-        if (numeroRemetente.includes('@lid')) {
-            remoteJidLimpo = numeroRemetente; // Mantém o @lid inteiro no histórico
-        }
 
+        // ============================================================
+        // 📝 TEXTO DE RESPOSTA FIXO E PERFEITO (EXIGIDO)
+        // ============================================================
+        const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários. Para agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
 
-            // ============================================================
-            // 🔎 SUPER BUSCA: IDENTIDADE, CARGO E SERVIÇOS POR BARBEARIA
-            // ============================================================
-            let nomeConhecido = "";
-            let tipoUsuario = "cliente"; 
-            let isProprietario = false;
-            let meuUid = "";
-            let equipeNomes = [];
-            let equipePorBarbearia = {}; 
-            let tabelaServicosPorBarbearia = {}; 
-            let telefonePorBarbearia = {}; 
+        // CONFIGURAÇÕES DO MODULO DE ENVIO DA EVOLUTION
+        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+        const API_KEY_EVO = "Ja997640401"; 
 
-            try {
-                // Descobre quem está mandando a mensagem
-                const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
-                if (!userSnap.empty) {
-                    const uData = userSnap.docs[0].data();
-                    nomeConhecido = uData.nome || "";
-                    tipoUsuario = uData.tipo || "cliente";
-                    isProprietario = uData.isProprietario === true;
-                    meuUid = userSnap.docs[0].id;
-                } else {
-                    const agSnap = await db.collection('agendamentos').where('clienteTelefone', '==', remoteJidLimpo).orderBy('ts', 'desc').limit(1).get();
-                    if (!agSnap.empty && agSnap.docs[0].data().clienteNome) {
-                        nomeConhecido = agSnap.docs[0].data().clienteNome;
-                    }
-                }
-
-                // 🏢 BUSCA A EQUIPE BASEADA NO DOCUMENTO DO DONO (A MÁGICA DA CORREÇÃO)
-                const equipeSnap = await db.collection('usuarios').where('tipo', 'in', ['barbeiro', 'profissional', 'admin']).get();
-                let cacheDonos = {};
-
-                for (const doc of equipeSnap.docs) {
-                    const d = doc.data();
-                    if (d.nome) {
-                        // 1. Descobre quem é o Dono desta pessoa
-                        let uidDoDono = d.donoUid || d.vinculoSalao || (d.pertenceABarbearia ? d.pertenceABarbearia.uid : null) || doc.id; 
-                        
-                        // 2. Busca e faz o Cache dos dados reais do DONO
-                        if (!cacheDonos[uidDoDono]) {
-                            const donoDoc = await db.collection('usuarios').doc(uidDoDono).get();
-                            if (donoDoc.exists) {
-                                cacheDonos[uidDoDono] = donoDoc.data();
-                            } else {
-                                cacheDonos[uidDoDono] = d; // Fallback de segurança
-                            }
-                        }
-
-                        const dadosDono = cacheDonos[uidDoDono];
-                        const barbeariaAtual = dadosDono.nomeBarbearia || d.nomeBarbearia || "Barbearia King"; 
-
-                        // 3. Lê o array "equipe" DE DENTRO do documento do Dono!
-                        if (!equipePorBarbearia[barbeariaAtual]) {
-                            let nomesEquipeTemp = new Set(); // O Set evita nomes duplicados na IA
-                            
-                            // O dono sempre faz parte da equipe
-                            if (dadosDono.nome) nomesEquipeTemp.add(dadosDono.nome);
-
-                            // Varredura no array de equipe do dono
-                            if (dadosDono.equipe && Array.isArray(dadosDono.equipe)) {
-                                for (const membro of dadosDono.equipe) {
-                                    let nomeMembroAdicionar = "";
-                                    
-                                    // O banco pode ter salvo como um objeto {uid, nome} ou só a string do UID
-                                    if (typeof membro === 'object' && membro.nome) {
-                                        nomeMembroAdicionar = membro.nome;
-                                    } else {
-                                        let uidMembro = typeof membro === 'object' ? membro.uid : membro;
-                                        if (uidMembro) {
-                                            try {
-                                                // Vai no banco caçar o nome pelo UID
-                                                const mDoc = await db.collection('usuarios').doc(uidMembro).get();
-                                                if (mDoc.exists && mDoc.data().nome) {
-                                                    nomeMembroAdicionar = mDoc.data().nome;
-                                                }
-                                            } catch(e) {
-                                                console.log("Erro ao caçar nome do membro:", e.message);
-                                            }
-                                        }
-                                    }
-
-                                    if (nomeMembroAdicionar) {
-                                        nomesEquipeTemp.add(nomeMembroAdicionar);
-                                        // Se quem está falando com o bot for o dono, alimenta a variável interna dele
-                                        if (isProprietario && uidDoDono === meuUid) {
-                                            equipeNomes.push(nomeMembroAdicionar);
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Converte de volta para Array para ficar legível
-                            equipePorBarbearia[barbeariaAtual] = Array.from(nomesEquipeTemp);
-
-                            // 4. Puxa Serviços e Telefone do Dono
-                            tabelaServicosPorBarbearia[barbeariaAtual] = dadosDono.listaServicos || [];
-                            
-                            let telDono = dadosDono.telefone || "";
-                            if (telDono.includes('@')) telDono = telDono.split('@')[0];
-                            telefonePorBarbearia[barbeariaAtual] = telDono || "Número não informado";
-                        }
-                    }
-                }
-            } catch (e) {
-                console.log("[DB] Erro ao buscar identidade/serviços:", e.message);
+        const enviarMensagemSuporte = async (destino) => {
+            let numeroParaEnvio = destino;
+            if (!destino.includes('@lid')) {
+                numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
             }
 
-
-            // ============================================================
-            // 🧠 MEMÓRIA DO BOT
-            // ============================================================
-            const limitHistorico = 40; 
-            const chatRef = db.collection('historico_conversa').doc(remoteJidLimpo).collection('mensagens');
-
-            await chatRef.add({
-                role: 'user',
-                parts: [{ text: textoRecebido }],
-                ts: admin.firestore.FieldValue.serverTimestamp()
-            });
-
-            const historySnap = await chatRef.orderBy('ts', 'desc').limit(limitHistorico).get();
-            let historicoParaIA = [];
+            const body = {
+                number: numeroParaEnvio,
+                text: respostaFixa
+            };
             
-            historySnap.forEach(doc => {
-                const msg = doc.data();
-                if (msg.role && msg.parts) {
-                    historicoParaIA.unshift({ role: msg.role, parts: msg.parts });
-                }
-            });
-
-            // ============================================================
-            // 🛠️ FERRAMENTAS COMPLETAS
-            // ============================================================
-            const tools = [{
-                "function_declarations": [
-                    {
-                        "name": "listar_meus_agendamentos",
-                        "description": "Lista agendamentos. Se for o CHEFE perguntando, ele pode informar o nome do barbeiro para ver a agenda dele.",
-                        "parameters": { 
-                            "type": "OBJECT", 
-                            "properties": {
-                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional" }
-                            } 
-                        }
-                    },
-                    {
-                        "name": "consultar_disponibilidade",
-                        "description": "Busca a lista de TODOS os horários livres de um barbeiro em uma data. Use OBRIGATORIAMENTE para mostrar opções ao cliente.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "barbeiroNome": { "type": "STRING", "description": "Nome do profissional" }
-                            },
-                            "required": ["data", "barbeiroNome"]
-                        }
-                    },
-                    {
-                        "name": "criar_agendamento",
-                        "description": "Cria um novo agendamento para o cliente ou para a equipe.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "barbeiroNome": { "type": "STRING", "description": "Nome do barbeiro" },
-                                "clienteNome": { "type": "STRING", "description": "Nome do cliente" },
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" },
-                                "servico": { "type": "STRING", "description": "Nome do serviço" }
-                            },
-                            "required": ["barbeiroNome", "clienteNome", "data", "horario", "servico"]
-                        }
-                    },
-                    {
-                        "name": "atualizar_agendamento",
-                        "description": "Altera um agendamento existente. Exige a DATA e o HORÁRIO antigos.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "dataAntiga": { "type": "STRING", "description": "A data atual do agendamento YYYY-MM-DD" },
-                                "horarioAntigo": { "type": "STRING", "description": "O horário atual do agendamento HH:MM" },
-                                "novaData": { "type": "STRING", "description": "Nova Data YYYY-MM-DD" },
-                                "novoHorario": { "type": "STRING", "description": "Novo Horário HH:MM" },
-                                "novoServico": { "type": "STRING", "description": "Novo nome do serviço" },
-                                "novoBarbeiroNome": { "type": "STRING", "description": "Nome do novo profissional." }
-                            },
-                            "required": ["dataAntiga", "horarioAntigo"] 
-                        }
-                    },
-                    {
-                        "name": "cancelar_agendamento",
-                        "description": "Cancela um agendamento específico.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "data": { "type": "STRING", "description": "Data do agendamento YYYY-MM-DD" },
-                                "horariocancelar": { "type": "STRING", "description": "Horário a cancelar HH:MM" }
-                            },
-                            "required": ["data", "horariocancelar"]
-                        }
-                    },
-                    {
-                        "name": "excluir_agendamento_definitivo",
-                        "description": "Apaga PERMANENTEMENTE um agendamento do banco de dados.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "data": { "type": "STRING", "description": "Data YYYY-MM-DD" },
-                                "horario": { "type": "STRING", "description": "Horário HH:MM" }
-                            },
-                            "required": ["data", "horario"]
-                        }
-                    },
-                    {
-                        "name": "atualizar_meu_perfil",
-                        "description": "Atualiza ou cria o nome do usuário no banco de dados.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "novoNome": { "type": "STRING", "description": "Novo nome do usuário" }
-                            },
-                            "required": ["novoNome"]
-                        }
-                    },
-                    {
-                        "name": "consultar_gestao_financeira",
-                        "description": "Consulta o relatório financeiro e de desempenho (Entradas, Saídas, Saldo). Apenas o Chefe/Proprietário pode usar.",
-                        "parameters": {
-                            "type": "OBJECT",
-                            "properties": {
-                                "periodo": { "type": "STRING", "description": "O período desejado: 'dia', 'semana' ou 'mes'." },
-                                "barbeiroAlvo": { "type": "STRING", "description": "Opcional. Nome do profissional para filtrar. Se vazio, traz o total da barbearia." }
-                            },
-                            "required": ["periodo"]
-                        }
-                    }
-                ]
-            }];
-
-            // 👈 MAPA COMPLETO PARA A IA (Barbearia -> Contato -> Equipe -> Serviços)
-            const listaCompletaIA = Object.keys(equipePorBarbearia).map(barbearia => {
-                const profissionais = equipePorBarbearia[barbearia].join(', ');
-                const telefoneUnidade = telefonePorBarbearia[barbearia]; // 👈 Puxa o telefone
-                const servicos = (tabelaServicosPorBarbearia[barbearia] || []).map(s => {
-                    const n = s.nome || "Serviço";
-                    const v = s.valor || s.preco || 0;
-                    return `• ${n} (R$ ${v})`;
-                }).join('\n');
-                
-                return `💈 UNIDADE: ${barbearia}\n📱 CONTATO PRIVADO: ${telefoneUnidade}\n- Equipe: ${profissionais}\n- TABELA DE SERVIÇOS:\n${servicos || "Nenhum serviço cadastrado"}`;
-            }).join('\n\n====================\n\n');
-
-            // ============================================================
-            // 🤖 PERSONA MUTA-FORMA
-            // ============================================================
-            let regrasCargos = "";
-            if (isProprietario) {
-                regrasCargos = `[ATENÇÃO] Você está falando com o CHEFE / PROPRIETÁRIO do salão. EQUIPE: [${equipeNomes.join(', ')}]. 
-                - PODER DE GESTÃO: Ele pode pedir o desempenho financeiro usando 'consultar_gestao_financeira'.
-                - Seja direto, como um gerente reportando ao CEO.`;
-            } else if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
-                regrasCargos = `[ATENÇÃO] Você está falando com um PROFISSIONAL da equipe (Barbeiro). Ele gerencia APENAS a própria agenda.`;
-            } else {
-                regrasCargos = `[ATENÇÃO] Você está falando com um CLIENTE. Siga OBRIGATORIAMENTE este fluxo rigoroso, UM PASSO POR VEZ:
-                  PASSO 1: Pergunte: "Em qual barbearia você gostaria de agendar?". PARE DE FALAR AQUI!
-                  PASSO 2: Assim que o cliente disser a unidade, olhe o MAPA COMPLETO abaixo. Liste APENAS os profissionais que trabalham naquela unidade e pergunte com quem ele quer cortar.
-                  PASSO 3: Leia a TABELA DE SERVIÇOS exclusiva daquela unidade no MAPA COMPLETO e pergunte qual serviço ele deseja. É ESTRITAMENTE PROIBIDO misturar serviços de outras unidades ou inventar serviços.
-                  PASSO 4: Pergunte a Data (ex: "amanhã", "sexta-feira").
-                  PASSO 5: Use a ferramenta 'consultar_disponibilidade' e mostre os horários.
-                  PASSO 6: Pergunte o nome dele caso você ainda não saiba.
-                  PASSO 7: Resuma os dados (Unidade, Profissional, Serviço, Data, Horário e o VALOR EXATO da tabela daquela unidade) e peça a confirmação ("SIM").
-                  PASSO 8: Agende apenas após o SIM.`;
-            }
-
-            const API_KEY = process.env.GEMINI_API_KEY;
-            const MODEL_NAME = "gemini-2.5-flash"; 
-
-            const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-            const dataFormatada = dataHojeBrasil.toLocaleDateString('pt-BR');
-
-            const systemInstruction = {
-                parts: [{ text: `Você é a IA Avançada do King Agenda. Hoje é dia ${dataFormatada}.
-                Telefone: ${remoteJidLimpo}. Nome detectado: ${nomeConhecido ? nomeConhecido : "Desconhecido"}.
-                
-                Aqui está o MAPA COMPLETO de Barbearias, Profissionais, Telefones e TABELAS DE SERVIÇOS:
-                \n${listaCompletaIA}
-                
-                ${regrasCargos}
-
-                REGRAS DE OURO E ATALHOS:
-                1. ISOLAMENTO DE UNIDADES: Nunca ofereça um serviço de uma unidade para o cliente que escolheu outra unidade.
-                2. NÃO INVENTE SERVIÇOS: Ofereça e agende apenas o que estiver na tabela da unidade escolhida.
-                3. TRATAMENTO DE ERRO DE HORÁRIO: Se a ferramenta retornar erro de horário indisponível/ocupado/fora do expediente, você DEVE enviar OBRIGATORIAMENTE a seguinte frase exata: "VOCÊ PODE ENTRAR EM CONTATO COM A BARBEARIA NESSE NÚMERO PRIVADO [Inserir aqui o número do CONTATO PRIVADO da unidade que fica no dado "telefone" do usuario que que é o dono ou seja busque no dado "donoUid" o id e depois procure o dado "telefone"] PRA CONSULTAR CORRETAMENTE, POIS POSSO COMETER ALGUNS ERROS!".
-                4. NÃO SEJA AFOBADA: Faça UMA pergunta por vez.
-                5. PROIBIDO EMENDAR FUNÇÕES: Após usar a ferramenta "consultar_disponibilidade", você é OBRIGADA a responder ao cliente com uma mensagem de texto (fazendo o Resumo do Passo 7). NUNCA chame a função "criar_agendamento" sem que o cliente tenha digitado "SIM".
-                6. O ATALHO DO CLIENTE APRESSADO: Se o cliente já informar a data E o horário exatos, faça a consulta de disponibilidade em silêncio. Se o horário que ele pediu estiver na lista de livres, vá direto para o Passo 7 (Resumo). Se não estiver livre, mostre-lhe a lista de horários disponíveis.` }]
-            };
-
-            // MANTENHA A LINHA ABAIXO INTACTA
-            let respostaFinal = "";
-
             try {
-                console.log(`[IA] Pensando (Cargo: ${isProprietario ? 'Admin' : tipoUsuario})...`);
-                
-                const response1 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
+                const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+                await fetch(urlEvo, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: historicoParaIA, 
-                        tools: tools,
-                        system_instruction: systemInstruction
-                    })
+                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                    body: JSON.stringify(body)
                 });
-
-                const data1 = await response1.json();
-                
-                if (!data1.candidates || !data1.candidates[0]) {
-                    respostaFinal = "Tive um lapso de memória. Pode repetir?";
-                } else {
-                    const part1 = data1.candidates[0].content.parts[0];
-
-                    if (part1.functionCall) {
-                        const fnName = part1.functionCall.name;
-                        const fnArgs = part1.functionCall.args;
-                        console.log(`[IA] Ação: ${fnName}`, fnArgs);
-
-                        let functionResult = {};
-                        let fallbackMsg = "";
-
-                        // ============================================================
-                        // ⚙️ MOTORES MATEMÁTICOS (Com Subcoleção Agenda Diária)
-                        // ============================================================
-                        const timeToMin = (t) => {
-                            if (!t) return 0;
-                            const [h, m] = t.split(':').map(Number);
-                            return h * 60 + m;
-                        };
-
-                        const minToTime = (m) => {
-                            const h = Math.floor(m / 60);
-                            const mins = m % 60;
-                            return `${String(h).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
-                        };
-
-                        const getDateSafe = (field) => {
-                            if (!field) return null;
-                            if (typeof field.toDate === 'function') return field.toDate();
-                            if (field instanceof Date) return field;
-                            return new Date(field); 
-                        };
-
-const validarExpediente = async (barbeiro, dataStr, novoInicio, novoFim) => {
-                            let inicioExp = timeToMin(barbeiro.horarioInicio || "08:00");
-                            let fimExp = timeToMin(barbeiro.horarioFim || "20:00");
-                            let almocoIn = timeToMin(barbeiro.almocoInicio || "12:00");
-                            let almocoOut = timeToMin(barbeiro.almocoFim || "13:00");
-                            if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
-
-                            let usaAgendaManual = barbeiro.usaAgendaManual === true;
-                            let agendaDoDia = barbeiro.agenda || {};
-
-                            try {
-                                const agDiariaDoc = await db.collection('usuarios').doc(barbeiro.uid).collection('agenda_diaria').doc(dataStr).get();
-                                if (agDiariaDoc.exists) {
-                                    const dd = agDiariaDoc.data();
-                                    if (dd.horarios && Object.keys(dd.horarios).length > 0) { agendaDoDia = dd.horarios; usaAgendaManual = true; }
-                                    else if (Object.keys(dd).length > 0 && !dd.horarios) { agendaDoDia = dd; usaAgendaManual = true; }
-                                }
-                            } catch (e) {}
-
-                            // Regra 1: Fora do limite geral?
-                            if (novoInicio < inicioExp || novoFim > fimExp) return false;
-                            
-                            // Regra 2: Caiu no horário de almoço padrão?
-                            if (!usaAgendaManual && almocoIn !== -1 && ((novoInicio >= almocoIn && novoInicio < almocoOut) || (novoFim > almocoIn && novoFim <= almocoOut) || (novoInicio <= almocoIn && novoFim >= almocoOut))) return false;
-                            
-                            // Regra 3: Bateu nos blocos de 30min da agenda manual?
-                            if (usaAgendaManual) {
-                                for (let i = novoInicio; i < novoFim; i += 30) {
-                                    const st = agendaDoDia[minToTime(i)];
-                                    if (st === false || String(st).toLowerCase() === "false" || String(st).toLowerCase() === "ocupado") return false;
-                                }
-                            }
-                            return true; // Passou em tudo! Tá livre!
-                        };
-
-                        // Assíncrono para ler a subcoleção agenda_diaria
-                        const getWorkingIntervals = async (barbeiro, dataStr) => {
-                            let agendaDoDia = barbeiro.agenda || {};
-
-                            try {
-                                const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiro.uid).collection('agenda_diaria').doc(dataStr).get();
-                                if (agendaDiariaDoc.exists) {
-                                    const dadosDiarios = agendaDiariaDoc.data();
-                                    agendaDoDia = dadosDiarios.horarios || dadosDiarios; 
-                                }
-                            } catch (e) {
-                                console.log("[DB] Sem agenda_diaria especial para o dia, usando agenda fixa.");
-                            }
-                                
-                            let baseSlots = [];
-                            for (const [horaTxt, taLivre] of Object.entries(agendaDoDia)) {
-                                // 🛠️ CORREÇÃO: Agora aceita boolean (true) ou texto ("true", "livre") do banco de dados!
-                                if (taLivre === true || String(taLivre).toLowerCase() === "true" || String(taLivre).toLowerCase() === "livre") {
-                                    let hFormat = horaTxt.length === 4 ? "0" + horaTxt : horaTxt;
-                                    baseSlots.push(timeToMin(hFormat));
-                                }
-                            }
-                            baseSlots.sort((a, b) => a - b);
-                            
-                            let intervals = [];
-                            if (baseSlots.length > 0) {
-                                let start = baseSlots[0];
-                                let end = baseSlots[0] + 30; 
-                                for (let i = 1; i < baseSlots.length; i++) {
-                                    if (baseSlots[i] === end) {
-                                        end += 30; 
-                                    } else if (baseSlots[i] > end) {
-                                        intervals.push({ start, end });
-                                        start = baseSlots[i];
-                                        end = baseSlots[i] + 30;
-                                    }
-                                }
-                                intervals.push({ start, end });
-                            }
-                            return { intervals, baseSlots };
-                        };
-
-                        const isWithinWorkingHours = (start, end, intervals) => {
-                            for (let iv of intervals) {
-                                if (start >= iv.start && end <= iv.end) return true;
-                            }
-                            return false;
-                        };
-
-                        let baseQuery = db.collection('agendamentos');
-                        if (!isProprietario) { 
-                            if (tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional') {
-                                baseQuery = baseQuery.where('barbeiroUid', '==', meuUid); 
-                            } else {
-                                baseQuery = baseQuery.where('clienteTelefone', '==', remoteJidLimpo); 
-                            }
-                        }
-
-                        // === 1. LISTAR AGENDAMENTOS ===
-                        if (fnName === "listar_meus_agendamentos") {
-                            try {
-                                let queryListar = baseQuery.where('status', 'in', ['confirmado', 'conclusão pendente']);
-                                const snap = await queryListar.get();
-
-                                if (snap.empty) {
-                                    functionResult = { msg: "Nenhum agendamento encontrado." };
-                                } else {
-                                    let lista = [];
-                                    const buscaNome = fnArgs.barbeiroAlvo ? fnArgs.barbeiroAlvo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : null;
-                                    
-                                    snap.forEach(doc => {
-                                        const d = doc.data();
-                                        const nomeBanco = (d.barbeiroNome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        if (!buscaNome || nomeBanco.includes(buscaNome)) {
-                                            lista.push(`- Dia ${d.data} às ${d.horario}: ${d.servico} com ${d.barbeiroNome} (Cliente: ${d.clienteNome})`);
-                                        }
-                                    });
-
-                                    functionResult = { status: "SUCESSO", agendamentos: lista };
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 2. CONSULTAR DISPONIBILIDADE (MOTOR MATEMÁTICO DOMINÓ) ===
-                        else if (fnName === "consultar_disponibilidade") {
-                            try {
-                                const allUsers = await db.collection('usuarios').get();
-                                let barbeiroEncontrado = null;
-                                const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-                                allUsers.forEach(doc => {
-                                    const d = doc.data();
-                                    const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
-                                    if (ehValido) { 
-                                        const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { uid: doc.id, ...d };
-                                        }
-                                    }
-                                });
-
-                                if (!barbeiroEncontrado) {
-                                    functionResult = { erro: "Profissional não encontrado." };
-                                } else {
-                                    let inicioExp = timeToMin(barbeiroEncontrado.horarioInicio || "08:00");
-                                    let fimExp = timeToMin(barbeiroEncontrado.horarioFim || "20:00");
-                                    let almocoIn = timeToMin(barbeiroEncontrado.almocoInicio || "12:00");
-                                    let almocoOut = timeToMin(barbeiroEncontrado.almocoFim || "13:00");
-                                    if (almocoIn === almocoOut) { almocoIn = -1; almocoOut = -1; }
-                                    
-                                    let usaAgendaManual = barbeiroEncontrado.usaAgendaManual === true;
-                                    let agendaDoDia = barbeiroEncontrado.agenda || {}; 
-
-                                    try {
-                                        const agendaDiariaDoc = await db.collection('usuarios').doc(barbeiroEncontrado.uid).collection('agenda_diaria').doc(fnArgs.data).get();
-                                        if (agendaDiariaDoc.exists) {
-                                            const dadosDiarios = agendaDiariaDoc.data();
-                                            if (dadosDiarios.horarios && Object.keys(dadosDiarios.horarios).length > 0) {
-                                                agendaDoDia = dadosDiarios.horarios;
-                                                usaAgendaManual = true; 
-                                            } else if (Object.keys(dadosDiarios).length > 0 && !dadosDiarios.horarios) {
-                                                agendaDoDia = dadosDiarios;
-                                                usaAgendaManual = true;
-                                            }
-                                        }
-                                    } catch (e) {}
-
-                                    const agSnap = await db.collection('agendamentos')
-                                        .where('barbeiroUid', '==', barbeiroEncontrado.uid)
-                                        .where('data', '==', fnArgs.data)
-                                        .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                        .get(); 
-                                    
-                                    const ocupados = [];
-                                    agSnap.forEach(doc => {
-                                        const ag = doc.data();
-                                        let inicio = timeToMin(ag.horario);
-                                        let duracao = ag.duracao ? Number(ag.duracao) : 30; 
-                                        let fim = inicio + duracao;
-                                        ocupados.push({ inicio, fim, servico: ag.servico });
-                                    });
-
-                                    // 💡 A MÁGICA: Odena os ocupados do mais cedo pro mais tarde
-                                    ocupados.sort((a, b) => a.inicio - b.inicio);
-
-                                    const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-                                    const isToday = fnArgs.data === hoje.toISOString().split('T')[0];
-                                    const agoraMin = hoje.getHours() * 60 + hoje.getMinutes();
-
-                                    let horariosLivres = [];
-                                    const duracaoPadrao = barbeiroEncontrado.intervaloAtendimento ? Number(barbeiroEncontrado.intervaloAtendimento) : 30;
-                                    
-                                    // 💡 O CURSOR DESLIZANTE
-                                    let cursor = inicioExp;
-
-                                    while (cursor <= fimExp - duracaoPadrao) {
-                                        // A. O horário já passou?
-                                        if (isToday && cursor <= agoraMin) {
-                                            cursor += duracaoPadrao;
-                                            continue;
-                                        }
-
-                                        // B. Horário de almoço padrão
-                                        if (!usaAgendaManual && almocoIn !== -1 && cursor >= almocoIn && cursor < almocoOut) {
-                                            cursor = almocoOut;
-                                            continue;
-                                        }
-
-                                        // C. CÁLCULO ANTI-ACAVALAMENTO COM PULO INTELIGENTE
-                                        let colidiu = false;
-                                        let salto = 0;
-                                        let slotFim = cursor + duracaoPadrao;
-                                        
-                                        for (const oc of ocupados) {
-                                            if (cursor < oc.fim && slotFim > oc.inicio) {
-                                                colidiu = true;
-                                                salto = oc.fim; // Se bateu, desliza o cursor exatamente para o FIM do serviço (Ex: 18:40)
-                                                break;
-                                            }
-                                        }
-
-                                        if (colidiu) {
-                                            cursor = salto;
-                                            continue;
-                                        }
-
-                                        const horaFormatada = minToTime(cursor);
-
-                                        // D. Verificação da Agenda Manual
-                                        if (usaAgendaManual) {
-                                            const statusSlot = agendaDoDia[horaFormatada];
-                                            if (statusSlot === false || String(statusSlot).toLowerCase() === "false" || String(statusSlot).toLowerCase() === "ocupado") {
-                                                cursor += duracaoPadrao;
-                                                continue;
-                                            }
-                                        }
-
-                                        // E. Verifica se cabe no "buraco" antes do próximo
-                                        let proximoObstaculo = fimExp;
-                                        const proxBlk = ocupados.find(b => b.inicio > cursor);
-                                        if (proxBlk && proxBlk.inicio < proximoObstaculo) proximoObstaculo = proxBlk.inicio;
-                                        if (!usaAgendaManual && almocoIn !== -1 && cursor < almocoIn && almocoIn < proximoObstaculo) proximoObstaculo = almocoIn;
-
-                                        if ((proximoObstaculo - cursor) >= duracaoPadrao) {
-                                            horariosLivres.push(horaFormatada);
-                                        }
-
-                                        cursor += duracaoPadrao;
-                                    }
-
-                                    if (horariosLivres.length > 0) {
-                                        functionResult = { status: "LIVRE", horarios: horariosLivres };
-                                    } else {
-                                        functionResult = { status: "LOTADO", msg: "A agenda deste profissional está 100% lotada ou bloqueada neste dia." };
-                                    }
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 3. CRIAR AGENDAMENTO ===
-                        else if (fnName === "criar_agendamento") {
-                            try {
-                                const allUsers = await db.collection('usuarios').get();
-                                let barbeiroEncontrado = null;
-                                const nomeBusca = fnArgs.barbeiroNome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-                                allUsers.forEach(doc => {
-                                    const d = doc.data();
-                                    const ehValido = (d.tipo !== 'admin' || d.isProprietario === true);
-                                    if (ehValido) { 
-                                        const nomeBanco = (d.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        if (nomeBanco.includes(nomeBusca)) {
-                                            barbeiroEncontrado = { 
-                                                uid: doc.id, 
-                                                nome: d.nome, 
-                                                percentual: d.percentualComissao || 50, 
-                                                agenda: d.agenda,
-                                                listaServicos: d.listaServicos, // 👈 SALVA A LISTA DELE
-                                                nomeBarbearia: d.nomeBarbearia || "Barbearia King",
-                                                donoUid: d.donoUid || d.vinculoSalao || (d.pertenceABarbearia ? d.pertenceABarbearia.uid : null) || doc.id 
-                                            };
-                                        }
-                                    }
-                                });
-
-                                if (!barbeiroEncontrado) {
-                                    functionResult = { erro: "Profissional não encontrado." };
-                                } else {
-                                    let horaFinal = fnArgs.horario;
-                                    if (!horaFinal.startsWith("0") && horaFinal.length === 4) horaFinal = "0" + horaFinal;
-                                    
-                                    const novoInicio = timeToMin(horaFinal);
-                                    
-                                    // 🎯 BUSCA A LISTA OFICIAL DO BARBEIRO OU DO DONO DIRETAMENTE DO BANCO!
-                                    let lista = barbeiroEncontrado.listaServicos || [];
-                                    if (lista.length === 0) {
-                                        let idDono = barbeiroEncontrado.donoUid;
-                                        if (typeof idDono === 'object' && idDono !== null) idDono = idDono.uid;
-                                        if (idDono && idDono !== barbeiroEncontrado.uid) {
-                                            const docDono = await db.collection('usuarios').doc(idDono).get();
-                                            if (docDono.exists && docDono.data().listaServicos) {
-                                                lista = docDono.data().listaServicos;
-                                            }
-                                        }
-                                    }
-                                    
-                                    let valorServico = 0; 
-                                    let nomeServicoOficial = "";
-                                    let duracaoServicoFinal = 30; 
-                                    let servicoEncontradoNoBanco = false; 
-
-                                    if (lista.length > 0) {
-                                        const buscaServico = fnArgs.servico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                        
-                                        let achado = lista.find(s => {
-                                            const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                            return nomeS === buscaServico;
-                                        });
-
-                                        if (!achado) {
-                                            const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
-                                            achado = listaOrdenada.find(s => {
-                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                                return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
-                                            });
-                                        }
-                                        
-                                        if (achado) {
-                                            servicoEncontradoNoBanco = true;
-                                            if (achado.valor) valorServico = Number(achado.valor);
-                                            else if (achado.preco) valorServico = Number(achado.preco);
-                                            if (achado.duracao) duracaoServicoFinal = Number(achado.duracao);
-                                            nomeServicoOficial = achado.nome || achado;
-                                        }
-                                    }
-
-                                    if (!servicoEncontradoNoBanco) {
-                                        functionResult = { erro: `O serviço '${fnArgs.servico}' NÃO EXISTE na tabela oficial. Use exatamente os nomes listados no cardápio.` };
-                                    } else {
-                                        const novoFim = novoInicio + duracaoServicoFinal; 
-                                        const isValido = await validarExpediente(barbeiroEncontrado, fnArgs.data, novoInicio, novoFim);
-
-                                        if (!isValido) {
-                                            functionResult = { erro: "O horário escolhido está fora do expediente/agenda_diaria." };
-                                        } else {
-                                            const conflitoSnap = await db.collection('agendamentos')
-                                                .where('barbeiroUid', '==', barbeiroEncontrado.uid)
-                                                .where('data', '==', fnArgs.data)
-                                                .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                                .limit(100)
-                                                .get();
-
-                                            let temConflito = false;
-                                            conflitoSnap.forEach(doc => {
-                                                const ag = doc.data();
-                                                const ocInicio = timeToMin(ag.horario);
-                                                const ocDuracao = ag.duracao ? Number(ag.duracao) : 40;
-                                                const ocFim = ocInicio + ocDuracao; 
-                                                if (novoInicio < ocFim && novoFim > ocInicio) {
-                                                    temConflito = true;
-                                                }
-                                            });
-
-                                            if (temConflito) {
-                                                functionResult = { erro: "HORÁRIO JÁ OCUPADO (Acavalamento detectado)." };
-                                            } else {
-                                                const comissao = (valorServico * barbeiroEncontrado.percentual) / 100;
-                                                const telefoneSalvar = (typeof isProprietario !== 'undefined' && (isProprietario || tipoUsuario === 'barbeiro' || tipoUsuario === 'profissional')) ? "whatsapp_gerencia" : remoteJidLimpo;
-
-                                                await db.collection('agendamentos').add({
-                                                    barbeiroUid: barbeiroEncontrado.uid,
-                                                    barbeiroNome: barbeiroEncontrado.nome,
-                                                    nomeBarbearia: barbeiroEncontrado.nomeBarbearia, 
-                                                    clienteNome: fnArgs.clienteNome,
-                                                    clienteTelefone: telefoneSalvar,
-                                                    clienteUid: "whatsapp_guest",
-                                                    data: fnArgs.data,
-                                                    horario: horaFinal,
-                                                    servico: nomeServicoOficial,
-                                                    duracao: duracaoServicoFinal,
-                                                    valor: valorServico,
-                                                    valorOriginal: valorServico,
-                                                    valorFinalPago: valorServico,
-                                                    status: "confirmado",
-                                                    origem: "whatsapp_bot",
-                                                    ts: admin.firestore.FieldValue.serverTimestamp(),
-                                                    visualizado: false,
-                                                    comissaoCalculada: comissao,
-                                                    percentualComissao: barbeiroEncontrado.percentual,
-                                                    metodosPagamento: { dinheiro: 0, pix: 0, credito: 0, debito: 0 }
-                                                });
-                                                
-                                                functionResult = { status: "SUCESSO", valor: valorServico };
-                                            }
-                                        }
-                                    } 
-                                } 
-                            } catch (e) { functionResult = { erro: "Erro ao agendar: " + e.message }; }
-                        }
-
-                        // === 4. ATUALIZAR AGENDAMENTO ===
-                        else if (fnName === "atualizar_agendamento") {
-                            try {
-                                let hAntigo = fnArgs.horarioAntigo;
-                                if (hAntigo && !hAntigo.startsWith("0") && hAntigo.length === 4) hAntigo = "0" + hAntigo;
-
-                                const agSnap = await baseQuery
-                                    .where('data', '==', fnArgs.dataAntiga)
-                                    .where('horario', '==', hAntigo)
-                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                    .get();
-
-                                if (agSnap.empty) {
-                                    functionResult = { erro: "Agendamento antigo não encontrado ou sem permissão." };
-                                } else {
-                                    const targetDoc = agSnap.docs[0];
-                                    const oldData = targetDoc.data();
-                                    
-                                    let novaDataFinal = fnArgs.novaData || oldData.data;
-                                    let novoHorarioFinal = fnArgs.novoHorario || oldData.horario;
-                                    if (!novoHorarioFinal.startsWith("0") && novoHorarioFinal.length === 4) novoHorarioFinal = "0" + novoHorarioFinal;
-
-                                    let novoBarbeiroUid = oldData.barbeiroUid;
-                                    let novoBarbeiroNome = oldData.barbeiroNome;
-                                    let barbeiroObjCompleto = null;
-
-                                    const allUsers = await db.collection('usuarios').get();
-                                    const buscaNomeB = (fnArgs.novoBarbeiroNome || oldData.barbeiroNome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                    
-                                    allUsers.forEach(uDoc => {
-                                        const u = uDoc.data();
-                                        const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        if (nomeBanco.includes(buscaNomeB)) { 
-                                            novoBarbeiroUid = uDoc.id; 
-                                            novoBarbeiroNome = u.nome; 
-                                            barbeiroObjCompleto = { uid: uDoc.id, ...u }; 
-                                        }
-                                    });
-
-                                    if (!barbeiroObjCompleto) {
-                                        functionResult = { erro: "Profissional destino não encontrado." };
-                                    } else {
-                                        
-                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 30;
-                                        let valorServico = oldData.valorOriginal || oldData.valor || 0;
-                                        let nomeServicoOficial = oldData.servico;
-                                        let comissaoCalculada = oldData.comissaoCalculada || 0;
-                                        let percentual = barbeiroObjCompleto.percentualComissao || barbeiroObjCompleto.comissao || barbeiroObjCompleto.taxaComissao || 50;
-
-                                        if (fnArgs.novoServico) {
-                                            // 🎯 BUSCA A LISTA OFICIAL DO BARBEIRO OU DO DONO DIRETAMENTE DO BANCO!
-                                            let lista = barbeiroObjCompleto.listaServicos || [];
-                                            if (lista.length === 0) {
-                                                let idDono = barbeiroObjCompleto.donoUid || barbeiroObjCompleto.vinculoSalao || (barbeiroObjCompleto.pertenceABarbearia ? barbeiroObjCompleto.pertenceABarbearia.uid : null);
-                                                if (typeof idDono === 'object' && idDono !== null) idDono = idDono.uid;
-                                                if (idDono && idDono !== barbeiroObjCompleto.uid) {
-                                                    const docDono = await db.collection('usuarios').doc(idDono).get();
-                                                    if (docDono.exists && docDono.data().listaServicos) {
-                                                        lista = docDono.data().listaServicos;
-                                                    }
-                                                }
-                                            }
-                                            
-                                            const buscaServico = fnArgs.novoServico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                            
-                                            let achado = lista.find(s => {
-                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                                return nomeS === buscaServico;
-                                            });
-
-                                            if (!achado) {
-                                                const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
-                                                achado = listaOrdenada.find(s => {
-                                                    const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                                    return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
-                                                });
-                                            }
-
-                                            if (achado) {
-                                                if (achado.valor) valorServico = Number(achado.valor);
-                                                else if (achado.preco) valorServico = Number(achado.preco);
-                                                if (achado.duracao) duracaoServ = Number(achado.duracao);
-                                                nomeServicoOficial = achado.nome || achado;
-                                                comissaoCalculada = (valorServico * Number(percentual)) / 100;
-                                            } else {
-                                                functionResult = { erro: `O serviço '${fnArgs.novoServico}' NÃO EXISTE na tabela.` };
-                                                return;
-                                            }
-                                        }
-
-                                        const novoInicio = timeToMin(novoHorarioFinal);
-                                        const novoFim = novoInicio + duracaoServ; 
-                                        const isValido = await validarExpediente(barbeiroObjCompleto, novaDataFinal, novoInicio, novoFim);
-
-                                        if (!isValido) {
-                                            functionResult = { erro: "O novo horário está fora do expediente." };
-                                        } else {
-                                            const conflitoSnap = await db.collection('agendamentos')
-                                                .where('barbeiroUid', '==', novoBarbeiroUid)
-                                                .where('data', '==', novaDataFinal)
-                                                .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                                .limit(100)
-                                                .get();
-
-                                            let temConflito = false;
-                                            conflitoSnap.forEach(doc => {
-                                                if (doc.id !== targetDoc.id) { 
-                                                    const ag = doc.data();
-                                                    const ocInicio = timeToMin(ag.horario);
-                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 30;
-                                                    const ocFim = ocInicio + ocDuracao; 
-                                                    if (novoInicio < ocFim && novoFim > ocInicio) {
-                                                        temConflito = true;
-                                                    }
-                                                }
-                                            });
-
-                                            if (temConflito) {
-                                                functionResult = { erro: "HORÁRIO NOVO JÁ OCUPADO." };
-                                            } else {
-                                                let novosDados = {
-                                                    data: novaDataFinal,
-                                                    horario: novoHorarioFinal,
-                                                    barbeiroUid: novoBarbeiroUid,
-                                                    barbeiroNome: novoBarbeiroNome,
-                                                    servico: nomeServicoOficial,
-                                                    valor: valorServico,
-                                                    valorOriginal: valorServico,
-                                                    valorFinalPago: valorServico,
-                                                    duracao: duracaoServ,
-                                                    comissaoCalculada: comissaoCalculada,
-                                                    percentualComissao: Number(percentual),
-                                                    editadoEm: admin.firestore.FieldValue.serverTimestamp()
-                                                };
-
-                                                await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
-                                                functionResult = { status: "SUCESSO", msg: "Atualizado.", novoValor: valorServico };
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 4. ATUALIZAR AGENDAMENTO ===
-                        else if (fnName === "atualizar_agendamento") {
-                            try {
-                                let hAntigo = fnArgs.horarioAntigo;
-                                if (hAntigo && !hAntigo.startsWith("0") && hAntigo.length === 4) hAntigo = "0" + hAntigo;
-
-                                const agSnap = await baseQuery
-                                    .where('data', '==', fnArgs.dataAntiga)
-                                    .where('horario', '==', hAntigo)
-                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                    .get();
-
-                                if (agSnap.empty) {
-                                    functionResult = { erro: "Agendamento antigo não encontrado ou sem permissão." };
-                                } else {
-                                    const targetDoc = agSnap.docs[0];
-                                    const oldData = targetDoc.data();
-                                    
-                                    let novaDataFinal = fnArgs.novaData || oldData.data;
-                                    let novoHorarioFinal = fnArgs.novoHorario || oldData.horario;
-                                    if (!novoHorarioFinal.startsWith("0") && novoHorarioFinal.length === 4) novoHorarioFinal = "0" + novoHorarioFinal;
-
-                                    let novoBarbeiroUid = oldData.barbeiroUid;
-                                    let novoBarbeiroNome = oldData.barbeiroNome;
-                                    let barbeiroObjCompleto = null;
-
-                                    const allUsers = await db.collection('usuarios').get();
-                                    const buscaNomeB = (fnArgs.novoBarbeiroNome || oldData.barbeiroNome).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                    
-                                    allUsers.forEach(uDoc => {
-                                        const u = uDoc.data();
-                                        const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        if (nomeBanco.includes(buscaNomeB)) { 
-                                            novoBarbeiroUid = uDoc.id; 
-                                            novoBarbeiroNome = u.nome; 
-                                            barbeiroObjCompleto = { uid: uDoc.id, ...u }; // Garante que o uid esteja dentro do objeto
-                                        }
-                                    });
-
-                                    if (!barbeiroObjCompleto) {
-                                        functionResult = { erro: "Profissional destino não encontrado." };
-                                    } else {
-                                        
-                                        // 🚀 A MÁGICA COMEÇA AQUI: Busca o novo serviço na tabela real
-                                        let duracaoServ = oldData.duracao ? Number(oldData.duracao) : 30;
-                                        let valorServico = oldData.valorOriginal || oldData.valor || 0;
-                                        let nomeServicoOficial = oldData.servico;
-                                        let comissaoCalculada = oldData.comissaoCalculada || 0;
-                                        
-                                        // Busca o percentual do barbeiro (com vários fallbacks de segurança)
-                                        let percentual = barbeiroObjCompleto.percentualComissao || barbeiroObjCompleto.comissao || barbeiroObjCompleto.taxaComissao || 50;
-
-                                        // Se a IA solicitou a troca de serviço
-                                        if (fnArgs.novoServico) {
-                                            const nomeBarbeariaTarget = barbeiroObjCompleto.nomeBarbearia || "Barbearia King";
-                                            // Puxa da tabela geral da barbearia OU da lista individual do barbeiro
-                                            const lista = tabelaServicosPorBarbearia[nomeBarbeariaTarget] || barbeiroObjCompleto.listaServicos || [];
-                                            
-                                            const buscaServico = fnArgs.novoServico.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                            
-                                            let achado = lista.find(s => {
-                                                const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                                return nomeS === buscaServico;
-                                            });
-
-                                            if (!achado) {
-                                                const listaOrdenada = [...lista].sort((a, b) => String(b.nome||"").length - String(a.nome||"").length);
-                                                achado = listaOrdenada.find(s => {
-                                                    const nomeS = String(s.nome || s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                                    return nomeS.includes(buscaServico) || buscaServico.includes(nomeS);
-                                                });
-                                            }
-
-                                            // SE ACHOU O SERVIÇO NA TABELA, ATUALIZA TUDO!
-                                            if (achado) {
-                                                if (achado.valor) valorServico = Number(achado.valor);
-                                                else if (achado.preco) valorServico = Number(achado.preco);
-                                                
-                                                if (achado.duracao) duracaoServ = Number(achado.duracao);
-                                                nomeServicoOficial = achado.nome || achado;
-                                                
-                                                // Recalcula a comissão
-                                                comissaoCalculada = (valorServico * Number(percentual)) / 100;
-                                            } else {
-                                                // Se a IA inventou um serviço que não existe, cancela a operação
-                                                functionResult = { erro: `O serviço '${fnArgs.novoServico}' NÃO EXISTE na tabela.` };
-                                                return; // Aborta
-                                            }
-                                        }
-
-                                        const novoInicio = timeToMin(novoHorarioFinal);
-                                        const novoFim = novoInicio + duracaoServ; 
-                                        const isValido = await validarExpediente(barbeiroObjCompleto, novaDataFinal, novoInicio, novoFim);
-
-                                        if (!isValido) {
-                                            functionResult = { erro: "O novo horário está fora do expediente da agenda_diaria." };
-                                        } else {
-                                            const conflitoSnap = await db.collection('agendamentos')
-                                                .where('barbeiroUid', '==', novoBarbeiroUid)
-                                                .where('data', '==', novaDataFinal)
-                                                .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                                .limit(100)
-                                                .get();
-
-                                            let temConflito = false;
-                                            conflitoSnap.forEach(doc => {
-                                                if (doc.id !== targetDoc.id) { 
-                                                    const ag = doc.data();
-                                                    const ocInicio = timeToMin(ag.horario);
-                                                    const ocDuracao = ag.duracao ? Number(ag.duracao) : 30;
-                                                    const ocFim = ocInicio + ocDuracao; 
-                                                    // Verifica o acavalamento usando a NOVA duração
-                                                    if (novoInicio < ocFim && novoFim > ocInicio) {
-                                                        temConflito = true;
-                                                    }
-                                                }
-                                            });
-
-                                            if (temConflito) {
-                                                functionResult = { erro: "HORÁRIO NOVO JÁ OCUPADO (Não há tempo suficiente para este serviço)." };
-                                            } else {
-                                                
-                                                // 📦 MONTA O PACOTE DE ATUALIZAÇÃO COMPLETO
-                                                let novosDados = {
-                                                    data: novaDataFinal,
-                                                    horario: novoHorarioFinal,
-                                                    barbeiroUid: novoBarbeiroUid,
-                                                    barbeiroNome: novoBarbeiroNome,
-                                                    servico: nomeServicoOficial,
-                                                    valor: valorServico,
-                                                    valorOriginal: valorServico,
-                                                    valorFinalPago: valorServico,
-                                                    duracao: duracaoServ,
-                                                    comissaoCalculada: comissaoCalculada,
-                                                    percentualComissao: Number(percentual),
-                                                    editadoEm: admin.firestore.FieldValue.serverTimestamp()
-                                                };
-
-                                                await db.collection('agendamentos').doc(targetDoc.id).update(novosDados);
-                                                functionResult = { status: "SUCESSO", msg: "Atualizado.", novoValor: valorServico };
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 5. CANCELAR AGENDAMENTO ===
-                        else if (fnName === "cancelar_agendamento") {
-                            try {
-                                let hCanc = fnArgs.horariocancelar;
-                                if (hCanc && !hCanc.startsWith("0") && hCanc.length === 4) hCanc = "0" + hCanc;
-
-                                const agSnap = await baseQuery
-                                    .where('data', '==', fnArgs.data)
-                                    .where('horario', '==', hCanc)
-                                    .where('status', 'in', ['confirmado', 'conclusão pendente'])
-                                    .get();
-
-                                if (agSnap.empty) {
-                                    functionResult = { erro: "Agendamento não encontrado ou sem permissão." };
-                                } else {
-                                    await db.collection('agendamentos').doc(agSnap.docs[0].id).update({ status: 'cancelado' });
-                                    functionResult = { status: "CANCELADO" };
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 6. EXCLUIR DEFINITIVO ===
-                        else if (fnName === "excluir_agendamento_definitivo") {
-                            try {
-                                let hCanc = fnArgs.horario;
-                                if (hCanc && !hCanc.startsWith("0") && hCanc.length === 4) hCanc = "0" + hCanc;
-
-                                const agSnap = await baseQuery
-                                    .where('data', '==', fnArgs.data)
-                                    .where('horario', '==', hCanc)
-                                    .get();
-
-                                if (agSnap.empty) {
-                                    functionResult = { erro: "Agendamento não encontrado para exclusão." };
-                                } else {
-                                    await db.collection('agendamentos').doc(agSnap.docs[0].id).delete(); 
-                                    functionResult = { status: "SUCESSO", msg: "Apagado." };
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 7. ATUALIZAR NOME DO PERFIL ===
-                        else if (fnName === "atualizar_meu_perfil") {
-                            try {
-                                const userSnap = await db.collection('usuarios').where('telefone', '==', remoteJidLimpo).limit(1).get();
-                                if (userSnap.empty) {
-                                    await db.collection('usuarios').add({
-                                        telefone: remoteJidLimpo,
-                                        nome: fnArgs.novoNome,
-                                        tipo: 'cliente',
-                                        ts: admin.firestore.FieldValue.serverTimestamp()
-                                    });
-                                } else {
-                                    await db.collection('usuarios').doc(userSnap.docs[0].id).update({ nome: fnArgs.novoNome });
-                                }
-                                functionResult = { status: "SUCESSO" };
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        // === 8. CONSULTAR GESTÃO FINANCEIRA ===
-                        else if (fnName === "consultar_gestao_financeira") {
-                            try {
-                                if (!isProprietario && tipoUsuario !== 'admin') {
-                                    functionResult = { erro: "Acesso Negado. Apenas o Proprietário tem acesso ao relatório financeiro." };
-                                } else {
-                                    const periodo = fnArgs.periodo || 'dia';
-                                    const hoje = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
-                                    let dataInicio = new Date(hoje);
-                                    
-                                    if (periodo === 'dia') {
-                                        dataInicio.setHours(0, 0, 0, 0);
-                                    } else if (periodo === 'semana') {
-                                        const diaDaSemana = hoje.getDay();
-                                        dataInicio.setDate(hoje.getDate() - diaDaSemana);
-                                        dataInicio.setHours(0, 0, 0, 0);
-                                    } else if (periodo === 'mes') {
-                                        dataInicio.setDate(1);
-                                        dataInicio.setHours(0, 0, 0, 0);
-                                    }
-
-                                    let targetUid = null;
-                                    let nomeAlvo = "Toda a Barbearia";
-                                    
-                                    if (fnArgs.barbeiroAlvo) {
-                                        const buscaNome = fnArgs.barbeiroAlvo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                        const allUsers = await db.collection('usuarios').get();
-                                        allUsers.forEach(doc => {
-                                            const u = doc.data();
-                                            const nomeBanco = (u.nome || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                                            if (nomeBanco.includes(buscaNome)) {
-                                                targetUid = doc.id;
-                                                nomeAlvo = u.nome;
-                                            }
-                                        });
-                                    }
-
-                                    // Busca Agendamentos (Concluídos)
-                                    let queryAgendamentos = db.collection('agendamentos').where('status', 'in', ['concluido']);
-                                    const agSnap = await queryAgendamentos.get();
-                                    
-                                    let totalEntradas = 0;
-                                    let qtdServicos = 0;
-
-                                    agSnap.forEach(doc => {
-                                        const ag = doc.data();
-                                        let tsAgendamento = getDateSafe(ag.dataConclusaoFalsa) || getDateSafe(ag.dataConclusao) || getDateSafe(ag.ts);
-
-                                        if (tsAgendamento && tsAgendamento >= dataInicio && tsAgendamento <= hoje) {
-                                            if (targetUid && ag.barbeiroUid !== targetUid) return;
-                                            
-                                            let valor = Number(ag.valorFinalPago || ag.valor || 0);
-                                            totalEntradas += valor;
-                                            qtdServicos++;
-                                        }
-                                    });
-
-                                    // Busca Extrato Financeiro Manual
-                                    let queryExtrato = db.collection('extrato_financeiro');
-                                    const exSnap = await queryExtrato.get();
-                                    
-                                    let totalSaidas = 0;
-                                    let totalEntradasManuais = 0;
-
-                                    exSnap.forEach(doc => {
-                                        const ex = doc.data();
-                                        let tsExtrato = getDateSafe(ex.dataEvento) || getDateSafe(ex.ts);
-
-                                        if (tsExtrato && tsExtrato >= dataInicio && tsExtrato <= hoje) {
-                                            if (targetUid && ex.usuarioUid !== targetUid && ex.uidProfissional !== targetUid) return;
-                                            
-                                            let valor = Number(ex.valor || 0);
-                                            if (ex.tipo === 'saida' || ex.tipo === 'despesa') {
-                                                totalSaidas += valor;
-                                            } else if (ex.tipo === 'entrada') {
-                                                totalEntradasManuais += valor;
-                                            }
-                                        }
-                                    });
-
-                                    let somaTotalEntradas = totalEntradas + totalEntradasManuais;
-                                    let lucroLiquido = somaTotalEntradas - totalSaidas;
-
-                                    functionResult = { 
-                                        status: "SUCESSO", 
-                                        periodo: periodo,
-                                        profissionalAnalisado: nomeAlvo,
-                                        dadosFinanceiros: {
-                                            servicosRealizadosConcluidos: qtdServicos,
-                                            faturamentoServicos: somaTotalEntradas,
-                                            totalDespesasSaidas: totalSaidas,
-                                            lucroLiquidoFinal: lucroLiquido
-                                        }
-                                    };
-                                }
-                            } catch (e) { functionResult = { erro: e.message }; }
-                        }
-
-                        console.log("[IA] Resultado Real:", functionResult);
-
-                        // 3️⃣ SEGUNDA CHAMADA
-                        try {
-                            const response2 = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${API_KEY}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    contents: [
-                                        ...historicoParaIA, 
-                                        { role: "model", parts: [part1] }, 
-                                        {
-                                            role: "function",
-                                            parts: [{
-                                                functionResponse: {
-                                                    name: fnName,
-                                                    response: { name: fnName, content: functionResult }
-                                                }
-                                            }]
-                                        }
-                                    ],
-                                    tools: tools
-                                })
-                            });
-
-                            const data2 = await response2.json();
-                            
-                            if (data2.candidates && data2.candidates[0] && data2.candidates[0].content && data2.candidates[0].content.parts && data2.candidates[0].content.parts[0].text) {
-                                respostaFinal = data2.candidates[0].content.parts[0].text;
-                            } else {
-                                console.log("[IA] Texto vazio na volta. Usando Fallback.");
-                                respostaFinal = fallbackMsg;
-                            }
-
-                        } catch (err2) {
-                            console.error("[IA] Fallback:", err2.message);
-                            respostaFinal = fallbackMsg; 
-                        }
-                    } else {
-                        respostaFinal = part1.text || "Pode repetir?";
-                    }
-                }
-            } catch (err) {
-                console.error("[IA] Erro Geral:", err);
-                respostaFinal = "Erro no servidor.";
+                console.log(`[ZAP] Resposta fixa enviada com sucesso para ${numeroParaEnvio}`);
+            } catch (e) { 
+                console.error("[ZAP] Erro ao enviar resposta fixa:", e.message); 
             }
+        };
 
-            // 💾 SALVA RESPOSTA
-            if (respostaFinal) {
-                await chatRef.add({
-                    role: 'model',
-                    parts: [{ text: respostaFinal }],
-                    ts: admin.firestore.FieldValue.serverTimestamp()
-                });
-            }
-
-            // --- ENVIO ---
-const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
-const API_KEY_EVO = "Ja997640401"; 
-
-            if (!respostaFinal) respostaFinal = "Erro interno.";
-            respostaFinal = respostaFinal.replace(/undefined/g, "");
-
-            const enviarMensagem = async (destino) => {
-                // 1. 🛡️ TRATAMENTO DE LIDs: Se o WhatsApp ocultou o número real, devolvemos para o @lid inteiro.
-                let numeroParaEnvio = destino;
-                if (!destino.includes('@lid')) {
-                    numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
-                }
-
-                // Aqui já não precisamos do options: checkNumber no body, vai tudo na URL
-                const body = {
-                    number: numeroParaEnvio,
-                    text: respostaFinal
-                };
-                
-                console.log(`[ZAP] Enviando Payload para ${numeroParaEnvio}:`, JSON.stringify(body));
-
-                try {
-                    // 🔥 GOLPE FATAL: Passando a ordem de NÃO CHECAR diretamente na URL! 🔥
-                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
-                    
-                    const r = await fetch(urlEvo, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json', 
-                            'apikey': API_KEY_EVO 
-                        },
-                        body: JSON.stringify(body)
-                    });
-                    
-                    console.log(`[ZAP] Status envio: ${r.status}`);
-
-                    if (!r.ok) {
-                        const erroEvo = await r.text();
-                        console.error("[ZAP] A Evolution recusou! Motivo exato:", erroEvo);
-                    }
-
-                } catch (e) { 
-                    console.error("[ZAP] Erro no fetch:", e.message); 
-                }
-            };
-
-            await enviarMensagem(numeroRemetente);
+        // Executa o envio da mensagem de aviso
+        await enviarMensagemSuporte(numeroRemetente);
         
     } catch (error) {
         console.error("Erro no Webhook:", error);
+    }
+});
+
+
+// ==================================================================
+// ⏰ NOVA ROTA DE CRON: MOTOR PROATIVO DE LEMBRETES (1H, 20MIN E OBRIGADO)
+// ==================================================================
+app.get('/cron/disparar-lembretes', async (req, res) => {
+    try {
+        const chaveSeguranca = req.query.key;
+        if (chaveSeguranca !== 'CronSeguroKing2026') {
+            return res.status(401).send('Acesso não autorizado.');
+        }
+
+        console.log("⏰ [CRON-LEMBRETES] Buscando agendamentos para processar avisos...");
+
+        // Configurações da Evolution
+        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+        const API_KEY_EVO = "Ja997640401";
+        const nomeDaInstancia = "KingAgenda";
+
+        // Captura a hora atual do Brasil (São Paulo)
+        const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+        const dataHojeStr = dataHojeBrasil.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+        const agoraEmMinutos = dataHojeBrasil.getHours() * 60 + dataHojeBrasil.getMinutes();
+
+        // Utilitário matemático de tempo
+        const timeToMin = (t) => {
+            if (!t) return 0;
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + m;
+        };
+
+        // 1. DISPARAR LEMBRETES (Para agendamentos com status 'confirmado')
+        const agendamentosSnap = await db.collection('agendamentos')
+            .where('data', '==', dataHojeStr)
+            .where('status', '==', 'confirmado')
+            .get();
+
+        for (const doc of agendamentosSnap.docs) {
+            const ag = doc.data();
+            const idAgendamento = doc.id;
+            
+            // Ignora se o cliente não tem telefone válido cadastrado no bot
+            if (!ag.clienteTelefone || ag.clienteTelefone === "whatsapp_gerencia") continue;
+
+            const horarioServicoMinutos = timeToMin(ag.horario);
+            const minutosRestantes = horarioServicoMinutos - agoraEmMinutos;
+
+            let textoAlerta = "";
+            let campoAtualizar = {};
+
+            // 🕒 CRITÉRIO 1: Lembrete de 1 Hora Antes (Janela tolerante entre 50 e 70 minutos)
+            if (minutosRestantes >= 50 && minutosRestantes <= 70 && !ag.lembrete1hEnviado) {
+                textoAlerta = `Olá, *${ag.clienteNome}*! Passando para te lembrar que seu agendamento de *${ag.servico}* com o profissional *${ag.barbeiroNome}* na *${ag.nomeBarbearia || 'nossa barbearia'}* está marcado para daqui a **1 hora** (às ${ag.horario}). Estamos te esperando! 💈`;
+                campoAtualizar = { lembrete1hEnviado: true };
+            } 
+            // 🕒 CRITÉRIO 2: Lembrete de 20 Minutos Antes (Janela tolerante entre 10 e 25 minutos)
+            else if (minutosRestantes >= 10 && minutosRestantes <= 25 && !ag.lembrete20mEnviado) {
+                textoAlerta = `Ei, *${ag.clienteNome}*! Seu horário está chegando. Seu atendimento de *${ag.servico}* está confirmado para daqui a **20 minutos** (às ${ag.horario}). Caso vá se atrasar, por favor avise o profissional! ⚡`;
+                campoAtualizar = { lembrete20mEnviado: true };
+            }
+
+            // Se ativou algum critério, dispara via Evolution e carimba o Firestore
+            if (textoAlerta !== "") {
+                let numLimpo = ag.clienteTelefone.split('@')[0].replace(/[^0-9]/g, '');
+                if (ag.clienteTelefone.includes('@lid')) numLimpo = ag.clienteTelefone;
+
+                try {
+                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+                    await fetch(urlEvo, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                        body: JSON.stringify({ number: numLimpo, text: textoAlerta })
+                    });
+                    
+                    // Grava de forma definitiva no banco para nunca mais duplicar
+                    await db.collection('agendamentos').doc(idAgendamento).update(campoAtualizar);
+                    console.log(`[CRON-LEMBRETE] Alerta disparado para ${ag.clienteNome} (${idAgendamento})`);
+                } catch (errEnvio) {
+                    console.error(`[CRON-LEMBRETE] Falha ao enviar para ${idAgendamento}:`, errEnvio.message);
+                }
+            }
+        }
+
+        // 2. DISPARAR AGRADECIMENTOS (Para agendamentos marcados como 'concluido' hoje)
+        const concluidosSnap = await db.collection('agendamentos')
+            .where('data', '==', dataHojeStr)
+            .where('status', '==', 'concluido')
+            .get();
+
+        for (const doc of concluidosSnap.docs) {
+            const ag = doc.data();
+            const idAgendamento = doc.id;
+
+            if (!ag.clienteTelefone || ag.clienteTelefone === "whatsapp_gerencia" || ag.agradecimentoEnviado) continue;
+
+            const horarioServicoMinutos = timeToMin(ag.horario);
+            const duracao = ag.duracao ? Number(ag.duracao) : 30;
+            const fimServicoMinutos = horarioServicoMinutos + duracao;
+
+            // Envia o agradecimento apenas se o horário do fim do corte já passou do momento atual
+            if (agoraEmMinutos > fimServicoMinutos) {
+                const textoAgradecimento = `Muito obrigado pela preferência, *${ag.clienteNome}*! Seu atendimento de *${ag.servico}* foi concluído com sucesso. Esperamos que tenha gostado do resultado! Até a próxima visita! 🌟💈`;
+                
+                let numLimpo = ag.clienteTelefone.split('@')[0].replace(/[^0-9]/g, '');
+                if (ag.clienteTelefone.includes('@lid')) numLimpo = ag.clienteTelefone;
+
+                try {
+                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+                    await fetch(urlEvo, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                        body: JSON.stringify({ number: numLimpo, text: textoAgradecimento })
+                    });
+                    
+                    // Carimba faturamento do envio concluído no banco
+                    await db.collection('agendamentos').doc(idAgendamento).update({ agradecimentoEnviado: true });
+                    console.log(`[CRON-AGRADECIMENTO] Mensagem de obrigado enviada para ${ag.clienteNome}`);
+                } catch (errEnvio) {
+                    console.error(`[CRON-AGRADECIMENTO] Falha ao enviar para ${idAgendamento}:`, errEnvio.message);
+                }
+            }
+        }
+
+        res.status(200).send("✅ Lembretes processados com sucesso!");
+
+    } catch (error) {
+        console.error("Erro fatal na execução do Cron de Lembretes:", error);
+        res.status(500).send("Erro interno: " + error.message);
     }
 });
 
