@@ -1740,8 +1740,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
         // ============================================================
         // 📝 TEXTO DE RESPOSTA FIXO E PERFEITO (EXIGIDO)
         // ============================================================
-        const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários.
-Se você quiser agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
+        const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários. Se você quiser agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
 
         // CONFIGURAÇÕES DO MODULO DE ENVIO DA EVOLUTION
         const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
