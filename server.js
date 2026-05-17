@@ -1908,6 +1908,121 @@ app.get('/cron/disparar-lembretes', async (req, res) => {
     }
 });
 
+// ==================================================================
+// 🏃‍♂️ ROTA DE CRON: RESGATE DE CLIENTES AUSENTES (MAIS DE 25 DIAS)
+// ==================================================================
+app.get('/cron/clientes-ausentes', async (req, res) => {
+    try {
+        const chaveSeguranca = req.query.key;
+        if (chaveSeguranca !== 'CronSeguroKing2026') {
+            return res.status(401).send('Acesso não autorizado.');
+        }
+
+        console.log("🔄 [CRON-AUSENTES] Iniciando varredura de clientes sumidos...");
+
+        // Configurações da Evolution API
+        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+        const API_KEY_EVO = "Ja997640401";
+        const nomeDaInstancia = "KingAgenda";
+
+        // Captura as datas no fuso horário do Brasil
+        const hojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
+        const hojeStr = hojeBrasil.toISOString().split('T')[0];
+
+        // Calcula a data exata de 25 dias atrás
+        const dataLimite = new Date(hojeBrasil);
+        dataLimite.setDate(hojeBrasil.getDate() - 25);
+        const dataLimiteStr = dataLimite.toISOString().split('T')[0];
+
+        // 1. Busca todos os agendamentos concluídos até 25 dias atrás
+        const agendamentosAntigosSnap = await db.collection('agendamentos')
+            .where('status', '==', 'concluido')
+            .where('data', '<=', dataLimiteStr)
+            .get();
+
+        if (agendamentosAntigosSnap.empty) {
+            return res.status(200).send("Nenhum agendamento antigo para analisar.");
+        }
+
+        // Agrupa os agendamentos para descobrir o último corte de cada cliente
+        const mapaUltimoCorte = {};
+        agendamentosAntigosSnap.forEach(doc => {
+            const ag = doc.data();
+            const fone = ag.clienteTelefone;
+            if (fone && fone !== "whatsapp_gerencia") {
+                // Se não tem no mapa ou se esse agendamento é mais recente do que o salvo, atualiza
+                if (!mapaUltimoCorte[fone] || ag.data > mapaUltimoCorte[fone].data) {
+                    mapaUltimoCorte[fone] = {
+                        clienteNome: ag.clienteNome,
+                        barbeiroNome: ag.barbeiroNome,
+                        nomeBarbearia: ag.nomeBarbearia || "nossa barbearia",
+                        data: ag.data
+                    };
+                }
+            }
+        });
+
+        let disparosRealizados = 0;
+
+        // 2. Agora verifica se esses clientes de fato não voltaram nos últimos 25 dias
+        for (const [telefone, dadosCorte] of Object.entries(mapaUltimoCorte)) {
+            
+            // Procura se o cliente tem alguma coisa recente (nos últimos 25 dias)
+            const agendamentoRecenteSnap = await db.collection('agendamentos')
+                .where('clienteTelefone', '==', telephone)
+                .where('data', '>', dataLimiteStr)
+                .limit(1)
+                .get();
+
+            // Se a busca voltou vazia, significa que ele REALMENTE está sumido há mais de 25 dias!
+            if (agendamentoRecenteSnap.empty) {
+                
+                // 🛡️ BLINDAGEM ANTI-SPAM: Busca o perfil do usuário para ver se já não mandamos o aviso de sumido recentemente
+                const userSnap = await db.collection('usuarios').where('telefone', '==', telephone.split('@')[0]).limit(1).get();
+                
+                if (!userSnap.empty) {
+                    const userDoc = userSnap.docs[0];
+                    const userData = userDoc.data();
+
+                    // Se já enviou uma mensagem de ausente nos últimos 30 dias, pula para não incomodar o cliente
+                    if (userData.ultimoAlertaAusente === hojeStr) continue;
+
+                    // Mensagem de marketing matadora para trazer o cliente de volta
+                    const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? CC ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte com o profissional *${dadosCorte.barbeiroNome}* na *${dadosCorte.nomeBarbearia}*.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
+
+                    let numLimpo = telephone.split('@')[0].replace(/[^0-9]/g, '');
+                    if (telephone.includes('@lid')) numLimpo = telephone;
+
+                    try {
+                        const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+                        await fetch(urlEvo, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                            body: JSON.stringify({ number: numLimpo, text: mensagemResgate })
+                        });
+
+                        // Carimba o perfil do usuário dizendo que ele já foi notificado hoje de que está ausente
+                        await db.collection('usuarios').doc(userDoc.id).update({
+                            ultimoAlertaAusente: hojeStr
+                        });
+
+                        disparosRealizados++;
+                        console.log(`[CRON-AUSENTES] 🚀 Mensagem de resgate enviada para ${dadosCorte.clienteNome}`);
+                    } catch (errEnvio) {
+                        console.error(`[CRON-AUSENTES] Erro ao enviar para ${telephone}:`, errEnvio.message);
+                    }
+                }
+            }
+        }
+
+        res.status(200).send(`✅ Varredura concluída! Músicas de resgate disparadas para ${disparosRealizados} clientes sumidos.`);
+
+    } catch (error) {
+        console.error("Erro fatal no Cron de Clientes Ausentes:", error);
+        res.status(500).send("Erro interno: " + error.message);
+    }
+});
+
 // --- ROTA DE CORREÇÃO DE DATAS (RODAR UMA VEZ E APAGAR) ---
 app.get('/admin/corrigir-datas-extrato', async (req, res) => {
     try {
