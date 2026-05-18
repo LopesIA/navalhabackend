@@ -150,27 +150,26 @@ if (process.env.NODE_ENV === 'production' || process.env.PORT) { // Verifica se 
 } else {
     console.log("[BOT] Bot de mensagens desativado em ambiente local.");
 }
-// --- FIM DA LÓGICA DO BOT ---
-
 // --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
 // Permite que apenas seu app web se comunique com este backend.
-// --- CONFIGURAÇÕES DO SERVIDOR EXPRESS ---
-// Permite que apenas seu app web se comunique com este backend.
-
-const allowedOrigins = [
-    'https://navalha-de-ouro-v11.web.app',
-    'https://novaversao.site',
-    'https://www.novaversao.site',
-    'http://localhost:3000' // Para desenvolvimento
-];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permite requisições sem 'origin' (ex: de apps mobile ou Postman)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
+    // 1. Permite requisições sem 'origin' (ex: de apps mobile, backend ou Postman)
+    if (!origin) return callback(null, true);
+
+    // 2. CURINGA: Se a origem tiver qualquer uma destas palavras-chave, está liberado!
+    if (
+        origin.includes('navalha-de-ouro-v11') || 
+        origin.includes('firebaseapp.com') || 
+        origin.includes('web.app') ||
+        origin.includes('novaversao.site') ||
+        origin.includes('localhost') ||
+        origin.includes('127.0.0.1')
+    ) {
+      return callback(null, true);
     } else {
-      callback(new Error('Acesso não permitido pela política de CORS'));
+      return callback(new Error('Acesso não permitido pela política de CORS'));
     }
   },
   optionsSuccessStatus: 200
