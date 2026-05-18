@@ -1765,6 +1765,40 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 
 
 // ============================================================
+// 🤖 FUNÇÃO GLOBAL PARA DISPARAR WHATSAPP (ACESSÍVEL POR TODOS)
+// ============================================================
+const enviarWhatsAppCron = async (destino, texto) => {
+    if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
+    
+    const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
+    const API_KEY_EVO = "Ja997640401"; 
+    const nomeDaInstancia = "KingAgenda"; 
+
+    let numeroLimpo = destino;
+    if (!destino.includes('@lid')) {
+        numeroLimpo = destino.replace(/[^0-9]/g, ''); 
+        if (numeroLimpo.length === 10 || numeroLimpo.length === 11) {
+            numeroLimpo = '55' + numeroLimpo;
+        }
+    }
+    
+    const body = { number: numeroLimpo, text: texto };
+    try {
+        const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+        const r = await fetch(urlEvo, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+            body: JSON.stringify(body)
+        });
+        if (!r.ok) console.error(`[ZAP] Erro Evo (${numeroLimpo}):`, await r.text());
+        // Aguarda 1 segundinho por segurança
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e) {
+        console.error("[ZAP] Erro no fetch:", e.message);
+    }
+};
+
+// ============================================================
 // 🚀 ROTA NOVA: CONFIRMAÇÃO IMEDIATA DE AGENDAMENTO (WHATSAPP)
 // ============================================================
 app.post('/api/confirmar-agendamento', express.json(), async (req, res) => {
@@ -1777,7 +1811,7 @@ app.post('/api/confirmar-agendamento', express.json(), async (req, res) => {
     try {
         const msgZap = `✅ *Agendamento Confirmado!*\n\nOlá, ${clienteNome}!\nSeu horário com o profissional *${barbeiroNome}* está garantido.\n\n📅 Data: ${data}\n⏰ Horário: ${horario}\n✂️ Serviço: ${servico}\n\nTe esperamos lá!`;
         
-        // Usa a mesma função da Evolution que você já tem configurada no server!
+        // Agora ele vai achar a função perfeitamente!
         await enviarWhatsAppCron(telefone, msgZap);
         
         console.log(`[ZAP] Confirmação imediata enviada para: ${clienteNome}`);
