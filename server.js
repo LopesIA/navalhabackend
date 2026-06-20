@@ -1605,158 +1605,152 @@ app.post('/api/chat-visagista', async (req, res) => {
 // =================================================================
 
 // =================================================================
-// 🛡️ MEMÓRIA TEMPORÁRIA CONTRA DUPLICIDADES DE WEBHOOK (15 SEGUNDOS)
+// 🛡️ MEMÓRIA TEMPORÁRIA CONTRA DUPLICIDADES DE WEBHOOK (15 SEGS)
 // =================================================================
 const mensagensProcessadas = new Set();
 
 // =================================================================
-// 🤖 WEBHOOK ATUALIZADO: APENAS DIRECIONAMENTO E RESPOSTA FIXA
+// 🤖 WEBHOOK BLINDADO: AUTO-RESPOSTA + PROTEÇÃO CONTRA LOOPS
 // =================================================================
 app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req, res) => {
+    // 1. LIBERAÇÃO IMEDIATA (Impede que a Evolution trave esperando resposta)
+    res.status(200).send('OK');
+
     try {
         const data = req.body;
-        
-        // 1. Verifica o evento (Apenas mensagens novas)
         const evento = data.event || data.event_type;
-        if (evento !== "messages.upsert" && evento !== "MESSAGES_UPSERT") {
-            return res.status(200).send('IGNORED_EVENT');
-        }
-
-        // 2. Responde imediatamente para a Evolution não travar o fluxo
-        res.status(200).send('EVENT_RECEIVED');
-
-        // 3. Extrai dados vitais com segurança
-        const msgInfo = data.data || {};
-        const key = msgInfo.key || {};
-        let numeroRemetente = key.remoteJid;
-        const fromMe = key.fromMe;
-        const msgId = key.id || msgInfo.id || msgInfo.messageId;
         const nomeDaInstancia = data.instance || "KingAgenda"; 
 
-        // 4. Ignora Status, Grupos e Mensagens do próprio Bot imediatamente
-        if (!numeroRemetente || fromMe || numeroRemetente.includes('@g.us') || numeroRemetente.includes('status')) {
-            return;
-        }
+        // =========================================================
+        // 🛡️ BARREIRA 1: BLINDAGEM DE STATUS (Salva seu Firebase)
+        // =========================================================
+        if (evento === 'connection.update') {
+            const state = data?.data?.state || data?.state;
+            
+            // Se for 'connecting', IGNORA completamente. Fim do loop de 7 mil reais.
+            if (state === 'connecting') return;
 
-        // 5. BLINDAGEM CONTRA DUPLICATAS DE WEBHOOK REPETIDO
-        if (msgId) {
-            if (mensagensProcessadas.has(msgId)) {
-                console.log(`[TRAVA] Mensagem repetida ignorada no Webhook: ${msgId}`);
-                return;
+            // Só processa se for open (conectado) ou close (desconectado)
+            if (state === 'open' || state === 'close') {
+                const docRef = db.collection('instancias_whatsapp').doc(nomeDaInstancia);
+                const doc = await docRef.get();
+
+                // Economia: Só gasta escrita no Firebase se o status realmente mudou
+                if (doc.exists && doc.data().status === state) return;
+
+                await docRef.set({ 
+                    status: state, 
+                    ultima_atualizacao: admin.firestore.FieldValue.serverTimestamp() 
+                }, { merge: true });
+                
+                console.log(`[FIREBASE] Status do Whatsapp (${nomeDaInstancia}) atualizado para: ${state}`);
             }
-            mensagensProcessadas.add(msgId);
-            setTimeout(() => mensagensProcessadas.delete(msgId), 15000); 
-        }
-
-        // 6. DESEMPACOTAR A MENSAGEM (O SEGREDO DAS MSG TEMPORÁRIAS)
-        let msgObj = msgInfo.message || {};
-        if (msgObj.ephemeralMessage && msgObj.ephemeralMessage.message) {
-            msgObj = msgObj.ephemeralMessage.message; 
-        } else if (msgObj.viewOnceMessage && msgObj.viewOnceMessage.message) {
-            msgObj = msgObj.viewOnceMessage.message; 
-        } else if (msgObj.viewOnceMessageV2 && msgObj.viewOnceMessageV2.message) {
-            msgObj = msgObj.viewOnceMessageV2.message; 
-        } else if (msgObj.documentWithCaptionMessage && msgObj.documentWithCaptionMessage.message) {
-            msgObj = msgObj.documentWithCaptionMessage.message; 
-        }
-
-        // 7. EXTRAIR O TEXTO DE VERDADE
-        const textoRecebido = 
-            msgObj.conversation || 
-            (msgObj.extendedTextMessage && msgObj.extendedTextMessage.text) || 
-            (msgObj.imageMessage && msgObj.imageMessage.caption) || 
-            (msgObj.videoMessage && msgObj.videoMessage.caption) || 
-            "";
-
-        // Se for áudio, mídia sem legenda ou figurinha, processa a resposta padrão mesmo assim
-        console.log(`[ZAP] Mensagem recebida de ${numeroRemetente}`);
-        
-        // 8. FIX MIKAELA
-        if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
-            numeroRemetente = "5527996598623@s.whatsapp.net"; 
+            return; // Encerra aqui, pois não é mensagem
         }
 
         // =========================================================
-        // 🕵️‍♂️ 9. MÁQUINA DE DESCOBERTA AUTOMÁTICA DO NÚMERO REAL
+        // 🤖 BARREIRA 2: PROCESSAMENTO DE MENSAGENS (Sua lógica)
         // =========================================================
-        if (numeroRemetente && numeroRemetente.includes('@lid')) {
-            try {
-                const cacheLid = await db.collection('lid_mapping').doc(numeroRemetente).get();
-                if (cacheLid.exists) {
-                    numeroRemetente = cacheLid.data().realNumber;
-                } else {
-                    const nomeWhatsapp = data.data?.pushName || msgInfo?.pushName || data.sender?.name || data.sender?.pushName;
-                    if (nomeWhatsapp) {
-                        let usuariosEncontrados = [];
-                        const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                        
-                        const allUsers = await db.collection('usuarios').get();
-                        allUsers.forEach(doc => {
-                            const u = doc.data();
-                            if (u.telefone && u.nome) {
-                                const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-                                if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
-                                    usuariosEncontrados.push(u);
-                                }
-                            }
-                        });
+        if (evento === "messages.upsert" || evento === "MESSAGES_UPSERT") {
+            const msgInfo = data.data || {};
+            const key = msgInfo.key || {};
+            let numeroRemetente = key.remoteJid;
+            const fromMe = key.fromMe;
+            const msgId = key.id || msgInfo.id || msgInfo.messageId;
 
-                        if (usuariosEncontrados.length > 0) {
-                            let alvo = usuariosEncontrados.length === 1 ? usuariosEncontrados[0] : usuariosEncontrados.find(u => u.tipo === 'cliente');
-                            if (!alvo) alvo = usuariosEncontrados[0]; 
+            // Ignora Status, Grupos e Mensagens do próprio Bot imediatamente
+            if (!numeroRemetente || fromMe || numeroRemetente.includes('@g.us') || numeroRemetente.includes('status')) return;
 
-                            let numeroRealEncontrado = alvo.telefone.replace(/[^0-9]/g, ''); 
-                            if (!numeroRealEncontrado.startsWith('55')) {
-                                numeroRealEncontrado = '55' + numeroRealEncontrado;
-                            }
-                            numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+            // Blindagem contra duplicatas de webhook repetido (15 segundos)
+            if (msgId) {
+                if (mensagensProcessadas.has(msgId)) return;
+                mensagensProcessadas.add(msgId);
+                setTimeout(() => mensagensProcessadas.delete(msgId), 15000); 
+            }
+
+            console.log(`[ZAP] Mensagem recebida de ${numeroRemetente}`);
+
+            // Fix Mikaela
+            if (numeroRemetente && numeroRemetente.includes("126280762691761")) {
+                numeroRemetente = "5527996598623@s.whatsapp.net"; 
+            }
+
+            // Máquina de Descoberta Automática do Número Real (@lid)
+            if (numeroRemetente && numeroRemetente.includes('@lid')) {
+                try {
+                    const cacheLid = await db.collection('lid_mapping').doc(numeroRemetente).get();
+                    if (cacheLid.exists) {
+                        numeroRemetente = cacheLid.data().realNumber;
+                    } else {
+                        const nomeWhatsapp = data.data?.pushName || msgInfo?.pushName || data.sender?.name || data.sender?.pushName;
+                        if (nomeWhatsapp) {
+                            let usuariosEncontrados = [];
+                            const nomeBusca = nomeWhatsapp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
                             
-                            await db.collection('lid_mapping').doc(numeroRemetente).set({ realNumber: numeroRealEncontrado });
-                            numeroRemetente = numeroRealEncontrado; 
+                            const allUsers = await db.collection('usuarios').get();
+                            allUsers.forEach(doc => {
+                                const u = doc.data();
+                                if (u.telefone && u.nome) {
+                                    const nomeBanco = u.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+                                    if (nomeBanco === nomeBusca || nomeBanco.includes(nomeBusca) || nomeBusca.includes(nomeBanco)) {
+                                        usuariosEncontrados.push(u);
+                                    }
+                                }
+                            });
+
+                            if (usuariosEncontrados.length > 0) {
+                                let alvo = usuariosEncontrados.length === 1 ? usuariosEncontrados[0] : usuariosEncontrados.find(u => u.tipo === 'cliente');
+                                if (!alvo) alvo = usuariosEncontrados[0]; 
+
+                                let numeroRealEncontrado = alvo.telefone.replace(/[^0-9]/g, ''); 
+                                if (!numeroRealEncontrado.startsWith('55')) {
+                                    numeroRealEncontrado = '55' + numeroRealEncontrado;
+                                }
+                                numeroRealEncontrado = numeroRealEncontrado.includes('@s.whatsapp.net') ? numeroRealEncontrado : `${numeroRealEncontrado}@s.whatsapp.net`;
+                                
+                                await db.collection('lid_mapping').doc(numeroRemetente).set({ realNumber: numeroRealEncontrado });
+                                numeroRemetente = numeroRealEncontrado; 
+                            }
                         }
                     }
+                } catch (e) {
+                    console.log(`[ZAP] Erro na Descoberta de Número:`, e.message);
                 }
-            } catch (e) {
-                console.log(`[ZAP] Erro na Descoberta de Número:`, e.message);
             }
+
+            // Texto de Resposta Fixo e Perfeito
+            const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários. Se você quiser agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
+
+            const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+            const API_KEY_EVO = "Ja997640401"; 
+
+            const enviarMensagemSuporte = async (destino) => {
+                let numeroParaEnvio = destino;
+                if (!destino.includes('@lid')) {
+                    numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
+                }
+
+                const body = {
+                    number: numeroParaEnvio,
+                    text: respostaFixa
+                };
+                
+                try {
+                    const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
+                    await fetch(urlEvo, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
+                        body: JSON.stringify(body)
+                    });
+                    console.log(`[ZAP] Resposta fixa enviada com sucesso para ${numeroParaEnvio}`);
+                } catch (e) { 
+                    console.error("[ZAP] Erro ao enviar resposta fixa:", e.message); 
+                }
+            };
+
+            await enviarMensagemSuporte(numeroRemetente);
         }
 
-        // ============================================================
-        // 📝 TEXTO DE RESPOSTA FIXO E PERFEITO (EXIGIDO)
-        // ============================================================
-        const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários. Se você quiser agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
-
-        // CONFIGURAÇÕES DO MODULO DE ENVIO DA EVOLUTION
-        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
-        const API_KEY_EVO = "Ja997640401"; 
-
-        const enviarMensagemSuporte = async (destino) => {
-            let numeroParaEnvio = destino;
-            if (!destino.includes('@lid')) {
-                numeroParaEnvio = destino.split('@')[0].replace(/[^0-9]/g, '');
-            }
-
-            const body = {
-                number: numeroParaEnvio,
-                text: respostaFixa
-            };
-            
-            try {
-                const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
-                await fetch(urlEvo, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'apikey': API_KEY_EVO },
-                    body: JSON.stringify(body)
-                });
-                console.log(`[ZAP] Resposta fixa enviada com sucesso para ${numeroParaEnvio}`);
-            } catch (e) { 
-                console.error("[ZAP] Erro ao enviar resposta fixa:", e.message); 
-            }
-        };
-
-        // Executa o envio da mensagem de aviso
-        await enviarMensagemSuporte(numeroRemetente);
-        
     } catch (error) {
         console.error("Erro no Webhook:", error);
     }
