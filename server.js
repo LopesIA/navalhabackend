@@ -929,7 +929,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         
         const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
         const API_KEY_EVO = "Ja997640401"; 
-        const nomeDaInstancia = "KingAgenda"; 
+        const nomeDaInstancia = "KingAgendaBot"; 
 
         let numeroLimpo = destino;
         if (!destino.includes('@lid')) {
@@ -1619,7 +1619,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
     try {
         const data = req.body;
         const evento = data.event || data.event_type;
-        const nomeDaInstancia = data.instance || "KingAgenda"; 
+        const nomeDaInstancia = data.instance || "KingAgendaBot"; 
 
         // =========================================================
         // 🛡️ BARREIRA 1: BLINDAGEM DE STATUS (Salva seu Firebase)
@@ -1765,7 +1765,7 @@ const enviarWhatsAppCron = async (destino, texto) => {
     
     const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
     const API_KEY_EVO = "Ja997640401"; 
-    const nomeDaInstancia = "KingAgenda"; 
+    const nomeDaInstancia = "KingAgendaBot"; 
 
     let numeroLimpo = destino;
     if (!destino.includes('@lid')) {
@@ -1830,7 +1830,7 @@ app.get('/cron/disparar-lembretes', async (req, res) => {
         // Configurações da Evolution
         const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
         const API_KEY_EVO = "Ja997640401";
-        const nomeDaInstancia = "KingAgenda";
+        const nomeDaInstancia = "KingAgendaBot";
 
         // Captura a hora atual do Brasil (São Paulo)
         const dataHojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
@@ -1959,7 +1959,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
         // Configurações da Evolution API
         const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
         const API_KEY_EVO = "Ja997640401";
-        const nomeDaInstancia = "KingAgenda";
+        const nomeDaInstancia = "KingAgendaBot";
 
         // Captura as datas no fuso horário do Brasil
         const hojeBrasil = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Sao_Paulo"}));
@@ -2227,7 +2227,7 @@ app.get('/cron/verificar-inauguracao', async (req, res) => {
 // 🚀 ROTA MÁGICA: DESLIGAR A TRAVA DO EVOLUTION (@LID)
 // ============================================================
 app.get('/desligar-trava', async (req, res) => {
-    const urlEvo = `https://evolution-king-agenda.onrender.com/settings/set/KingAgenda`;
+    const urlEvo = `https://evolution-king-agenda.onrender.com/settings/set/KingAgendaBot`;
     const API_KEY_EVO = "Ja997640401";
     
     try {
