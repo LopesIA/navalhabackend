@@ -913,7 +913,7 @@ app.get('/cron/limpar-chats', async (req, res) => {
     }
 });
 
-// --- CRON JOB ATUALIZADO (LEMBRETES COMPLETOS + RETENÇÃO 1 A 1 + CLIENTE MANUAL) ---
+// --- CRON JOB ATUALIZADO (LEMBRETES COMPLETOS APENAS) ---
 app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const { key } = req.query;
     
@@ -958,21 +958,20 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     // 🛡️ TRAVA DE SEGURANÇA: BUSCA O NOME CORRETO SE ESTIVER UNDEFINED
     const obterNomeProfissionalSeguro = async (ag) => {
         let nome = ag.barbeiroNome;
-        // Verifica se está quebrado, nulo, vazio ou "undefined"
         if (!nome || String(nome).toLowerCase() === "undefined" || String(nome).toLowerCase() === "null" || nome.trim() === "") {
             try {
                 if (ag.barbeiroUid) {
                     const bDoc = await db.collection('usuarios').doc(ag.barbeiroUid).get();
                     if (bDoc.exists && bDoc.data().nome) {
-                        return bDoc.data().nome; // Retorna o nome real do banco
+                        return bDoc.data().nome; 
                     }
                 }
             } catch (e) {
                 console.error("Erro ao resgatar nome do profissional:", e.message);
             }
-            return "o(a) profissional"; // Fallback amigável caso tudo falhe
+            return "o(a) profissional"; 
         }
-        return nome; // Se estiver ok, retorna o nome normal
+        return nome; 
     };
 
     // --- MÁQUINA DO TEMPO (DATAS) ---
@@ -989,12 +988,10 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     };
 
     const dataHoje = formatDateIso(agoraBrasil);
-    const dataAmanha = formatDateIso(amanhaBrasil);
     const data5Dias = formatDateIso(cincoDiasBrasil);
     
     const batch = db.batch();
     let contadorLembretes = 0; 
-    let contadorRetencao = 0;  
 
     try {
         const baseQuery = db.collection('agendamentos').where('status', 'in', ['confirmado', 'conclusão pendente']);
@@ -1006,7 +1003,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         for (const doc of snap5Dias.docs) {
             const ag = doc.data();
             if (!ag.lembrete5diasEnviado) {
-                const nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag); // Nome Blindado!
+                const nomeBarbeiroSeguro = await obterNomeProfissionalSeguro(ag);
                 
                 console.log(`[CRON] Disparando 5 DIAS para ${ag.clienteNome}`);
                 if (!ag.clienteUid.startsWith('manual_')) sendNotification(ag.clienteUid, '📅 Falta pouco!', `Faltam 5 dias para o seu horário com ${nomeBarbeiroSeguro}.`, { link: '#historico' });
@@ -1019,7 +1016,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
         }
 
         // =====================================================================
-        // 3. LEMBRETES DE HOJE (1 HORA, 20 MIN E AGRADECIMENTO)
+        // 2. LEMBRETES DE HOJE (1 HORA, 20 MIN E AGRADECIMENTO)
         // =====================================================================
         const snapHoje = await baseQuery.where('data', '==', dataHoje).get();
         for (const doc of snapHoje.docs) {
@@ -1032,7 +1029,6 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
 
             const minutosFaltando = Math.floor((horaAgendamento.getTime() - agoraBrasil.getTime()) / 60000);
             
-            // Só chama a função de blindagem se for precisar enviar a mensagem
             let nomeBarbeiroSeguro = ""; 
 
             // A. LEMBRETE DE 1 HORA (Entre 45 e 65 min antes)
@@ -1082,94 +1078,15 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
             }
         } 
 
-        // =====================================================================
-        // 4. RETENÇÃO: CLIENTES SUMIDOS (ENTRE 25 E 70 DIAS)
-        // =====================================================================
-        const vinteCincoDiasAtras = new Date(agoraBrasil.getTime() - 25 * 24 * 60 * 60 * 1000);
-        const setentaDiasAtras = new Date(agoraBrasil.getTime() - 70 * 24 * 60 * 60 * 1000);
-        
-        // 🔥 A CORREÇÃO: orderBy('ts', 'desc') garante que pegamos sempre quem ACABOU de bater 25 dias
-        const agendamentosAntigos = await db.collection('agendamentos')
-            .where('ts', '<=', admin.firestore.Timestamp.fromDate(vinteCincoDiasAtras))
-            .where('ts', '>=', admin.firestore.Timestamp.fromDate(setentaDiasAtras))
-            .orderBy('ts', 'desc') 
-            .limit(10) // Baixei para 10 para o WhatsApp não te bloquear por spam de uma vez
-            .get();
-            
-        const telefonesAnalisados = new Set();
-        const uidsAnalisados = new Set();
-        
-        for (const doc of agendamentosAntigos.docs) {
-            const ag = doc.data();
-            
-            // Se já enviou, ignora
-            if (ag.lembreteAusenciaEnviado) continue;
-
-            const isManual = !ag.clienteUid || ag.clienteUid.startsWith('manual_');
-
-            if (isManual && !ag.clienteTelefone) {
-                batch.update(doc.ref, { lembreteAusenciaEnviado: true });
-                continue;
-            }
-
-            if (isManual) {
-                if (telefonesAnalisados.has(ag.clienteTelefone)) continue;
-                telefonesAnalisados.add(ag.clienteTelefone);
-            } else {
-                if (uidsAnalisados.has(ag.clienteUid)) continue;
-                uidsAnalisados.add(ag.clienteUid);
-            }
-
-            let queryRecente;
-            if (isManual) {
-                queryRecente = db.collection('agendamentos').where('clienteTelefone', '==', ag.clienteTelefone);
-            } else {
-                queryRecente = db.collection('agendamentos').where('clienteUid', '==', ag.clienteUid);
-            }
-
-            const agendamentosDoCliente = await queryRecente.get();
-            let temAgendamentoRecente = false;
-
-            agendamentosDoCliente.forEach(docCli => {
-                const ts = docCli.data().ts;
-                const dataTS = ts ? ts.toDate() : new Date(0);
-                if (dataTS > vinteCincoDiasAtras) {
-                    temAgendamentoRecente = true;
-                }
-            });
-            
-            // Se o cara já cortou recente ou se o agendamento antigo não foi concluído
-            if (temAgendamentoRecente || (ag.status !== 'concluido' && ag.status !== 'avaliado')) {
-                batch.update(doc.ref, { lembreteAusenciaEnviado: true });
-                continue; 
-            }
-
-            console.log(`[CRON] Disparando RETENÇÃO para: ${ag.clienteNome}`);
-            if (!isManual) {
-                sendNotification(ag.clienteUid, '✂️ Tá na hora do talento?', `Faz um tempo que você não aparece! Que tal agendar um corte hoje?`, { link: '#barbeiros' });
-            }
-            
-            if (ag.clienteTelefone) {
-                const msgZap = `✂️ *Tá na hora do talento?*\n\nOlá, ${ag.clienteNome || 'Cliente'}! Faz um tempinho que você não vem aqui na barbearia.\nQue tal agendar um horário com a gente hoje? É só pedir aqui mesmo!`;
-                await enviarWhatsAppCron(ag.clienteTelefone, msgZap);
-            }
-
-            batch.update(doc.ref, { lembreteAusenciaEnviado: true });
-            contadorRetencao++;
-            
-            // Eu removi o "break" daqui. Agora ele vai mandar para as 10 pessoas do lote de uma vez, 
-            // e não apenas 1 por dia. Como tem aquele 'sleep' de 1 segundo na Evo, não dá bloqueio!
-        }
-
         await batch.commit();
-        res.status(200).send(`OK: Lembretes: ${contadorLembretes} | Retenção (1 a 1): ${contadorRetencao}`);
+        res.status(200).send(`OK: Lembretes disparados: ${contadorLembretes}`);
 
     } catch (error) {
         console.error(error);
         res.status(500).send("Erro no processamento: " + error.message);
     }
 });
-
+       
 // Rota de saúde para o Render saber que o app está no ar
 app.get('/', (req, res) => {
     res.send('Backend VersãoPro está no ar!');
@@ -1950,7 +1867,9 @@ app.get('/cron/disparar-lembretes', async (req, res) => {
 app.get('/cron/clientes-ausentes', async (req, res) => {
     try {
         const chaveSeguranca = req.query.key;
-        if (chaveSeguranca !== 'CronSeguroKing2026') {
+        
+        // 🔑 CORRIGIDO: Agora aceita tanto a sua chave padrão quanto a nova
+        if (chaveSeguranca !== process.env.CRON_SECRET_KEY && chaveSeguranca !== "Ja997640401" && chaveSeguranca !== 'CronSeguroKing2026') {
             return res.status(401).send('Acesso não autorizado.');
         }
 
@@ -2002,7 +1921,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
         // 2. Agora verifica se esses clientes de fato não voltaram nos últimos 25 dias
         for (const [telefone, dadosCorte] of Object.entries(mapaUltimoCorte)) {
             
-            // Procura se o cliente tem alguma coisa recente (nos últimos 25 dias) - CORRIGIDO PARA 'telefone'
+            // Procura se o cliente tem alguma coisa recente (nos últimos 25 dias)
             const agendamentoRecenteSnap = await db.collection('agendamentos')
                 .where('clienteTelefone', '==', telefone)
                 .where('data', '>', dataLimiteStr)
@@ -2012,20 +1931,22 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
             // Se a busca voltou vazia, significa que ele REALMENTE está sumido há mais de 25 dias!
             if (agendamentoRecenteSnap.empty) {
                 
-                // 🛡️ BLINDAGEM ANTI-SPAM - CORRIGIDO PARA 'telefone'
                 const userSnap = await db.collection('usuarios').where('telefone', '==', telefone.split('@')[0]).limit(1).get();
                 
                 if (!userSnap.empty) {
                     const userDoc = userSnap.docs[0];
                     const userData = userDoc.data();
 
-                    // Se já enviou uma mensagem de ausente nos últimos 30 dias, pula para não incomodar o cliente
-                    if (userData.ultimoAlertaAusente === hojeStr) continue;
+                    // 🛡️ CORREÇÃO CRÍTICA ANTI-SPAM: Garante que o cliente só receba 1 mensagem a cada 30 dias
+                    if (userData.ultimoAlertaAusente) {
+                        const ultimaData = new Date(userData.ultimoAlertaAusente);
+                        const diferencaDias = Math.floor((hojeBrasil - ultimaData) / (1000 * 60 * 60 * 24));
+                        if (diferencaDias < 30) continue; 
+                    }
 
                     // Mensagem de marketing
-                    const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? CC ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte com o profissional *${dadosCorte.barbeiroNome}* na *${dadosCorte.nomeBarbearia}*.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
+                    const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte com o profissional *${dadosCorte.barbeiroNome}* na *${dadosCorte.nomeBarbearia}*.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
 
-                    // CORRIGIDO PARA 'telefone'
                     let numLimpo = telefone.split('@')[0].replace(/[^0-9]/g, '');
                     if (telefone.includes('@lid')) numLimpo = telefone;
 
@@ -2037,7 +1958,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
                             body: JSON.stringify({ number: numLimpo, text: mensagemResgate })
                         });
 
-                        // Carimba o perfil do usuário
+                        // Carimba o perfil do usuário com a data de hoje
                         await db.collection('usuarios').doc(userDoc.id).update({
                             ultimoAlertaAusente: hojeStr
                         });
