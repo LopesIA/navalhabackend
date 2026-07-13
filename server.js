@@ -1986,7 +1986,6 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
             const ag = doc.data();
             const fone = ag.clienteTelefone;
             if (fone && fone !== "whatsapp_gerencia") {
-                // Se não tem no mapa ou se esse agendamento é mais recente do que o salvo, atualiza
                 if (!mapaUltimoCorte[fone] || ag.data > mapaUltimoCorte[fone].data) {
                     mapaUltimoCorte[fone] = {
                         clienteNome: ag.clienteNome,
@@ -2003,9 +2002,9 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
         // 2. Agora verifica se esses clientes de fato não voltaram nos últimos 25 dias
         for (const [telefone, dadosCorte] of Object.entries(mapaUltimoCorte)) {
             
-            // Procura se o cliente tem alguma coisa recente (nos últimos 25 dias)
+            // Procura se o cliente tem alguma coisa recente (nos últimos 25 dias) - CORRIGIDO PARA 'telefone'
             const agendamentoRecenteSnap = await db.collection('agendamentos')
-                .where('clienteTelefone', '==', telephone)
+                .where('clienteTelefone', '==', telefone)
                 .where('data', '>', dataLimiteStr)
                 .limit(1)
                 .get();
@@ -2013,8 +2012,8 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
             // Se a busca voltou vazia, significa que ele REALMENTE está sumido há mais de 25 dias!
             if (agendamentoRecenteSnap.empty) {
                 
-                // 🛡️ BLINDAGEM ANTI-SPAM: Busca o perfil do usuário para ver se já não mandamos o aviso de sumido recentemente
-                const userSnap = await db.collection('usuarios').where('telefone', '==', telephone.split('@')[0]).limit(1).get();
+                // 🛡️ BLINDAGEM ANTI-SPAM - CORRIGIDO PARA 'telefone'
+                const userSnap = await db.collection('usuarios').where('telefone', '==', telefone.split('@')[0]).limit(1).get();
                 
                 if (!userSnap.empty) {
                     const userDoc = userSnap.docs[0];
@@ -2023,11 +2022,12 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
                     // Se já enviou uma mensagem de ausente nos últimos 30 dias, pula para não incomodar o cliente
                     if (userData.ultimoAlertaAusente === hojeStr) continue;
 
-                    // Mensagem de marketing matadora para trazer o cliente de volta
+                    // Mensagem de marketing
                     const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? CC ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte com o profissional *${dadosCorte.barbeiroNome}* na *${dadosCorte.nomeBarbearia}*.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
 
-                    let numLimpo = telephone.split('@')[0].replace(/[^0-9]/g, '');
-                    if (telephone.includes('@lid')) numLimpo = telephone;
+                    // CORRIGIDO PARA 'telefone'
+                    let numLimpo = telefone.split('@')[0].replace(/[^0-9]/g, '');
+                    if (telefone.includes('@lid')) numLimpo = telefone;
 
                     try {
                         const urlEvo = `${LINK_CLOUDFLARE}/message/sendText/${encodeURIComponent(nomeDaInstancia)}?checkNumber=false`;
@@ -2037,7 +2037,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
                             body: JSON.stringify({ number: numLimpo, text: mensagemResgate })
                         });
 
-                        // Carimba o perfil do usuário dizendo que ele já foi notificado hoje de que está ausente
+                        // Carimba o perfil do usuário
                         await db.collection('usuarios').doc(userDoc.id).update({
                             ultimoAlertaAusente: hojeStr
                         });
@@ -2045,13 +2045,13 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
                         disparosRealizados++;
                         console.log(`[CRON-AUSENTES] 🚀 Mensagem de resgate enviada para ${dadosCorte.clienteNome}`);
                     } catch (errEnvio) {
-                        console.error(`[CRON-AUSENTES] Erro ao enviar para ${telephone}:`, errEnvio.message);
+                        console.error(`[CRON-AUSENTES] Erro ao enviar para ${telefone}:`, errEnvio.message);
                     }
                 }
             }
         }
 
-        res.status(200).send(`✅ Varredura concluída! Músicas de resgate disparadas para ${disparosRealizados} clientes sumidos.`);
+        res.status(200).send(`✅ Varredura concluída! Mensagens de resgate disparadas para ${disparosRealizados} clientes sumidos.`);
 
     } catch (error) {
         console.error("Erro fatal no Cron de Clientes Ausentes:", error);
