@@ -927,7 +927,7 @@ app.get('/cron/enviar-lembretes-completo', async (req, res) => {
     const enviarWhatsAppCron = async (destino, texto) => {
         if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
         
-        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
+        const LINK_CLOUDFLARE = "https://evolution-api-aagv.onrender.com";
         const API_KEY_EVO = "Ja997640401"; 
         const nomeDaInstancia = "KingAgenda"; 
 
@@ -1721,7 +1721,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
             // Texto de Resposta Fixo e Perfeito
             const respostaFixa = "Olá! Sou a IA de Lembretes do *King Agenda* ⏰.\n\nPor aqui, eu realizo apenas o disparo de avisos e confirmações de horários. Se você quiser agendar, cancelar ou tirar qualquer dúvida, por favor, entre em contato diretamente com o profissional ou utilize o chat dentro do aplicativo *King Agenda*! 😉";
 
-            const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+            const LINK_CLOUDFLARE = "https://evolution-api-aagv.onrender.com"; 
             const API_KEY_EVO = "Ja997640401"; 
 
             const enviarMensagemSuporte = async (destino) => {
@@ -1763,7 +1763,7 @@ app.post(['/webhook/whatsapp', '/webhook/whatsapp/messages-upsert'], async (req,
 const enviarWhatsAppCron = async (destino, texto) => {
     if (!destino || destino === "whatsapp_gerencia" || destino === "desconhecido") return;
     
-    const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com";
+    const LINK_CLOUDFLARE = "https://evolution-api-aagv.onrender.com";
     const API_KEY_EVO = "Ja997640401"; 
     const nomeDaInstancia = "KingAgenda"; 
 
@@ -1828,7 +1828,7 @@ app.get('/cron/disparar-lembretes', async (req, res) => {
         console.log("⏰ [CRON-LEMBRETES] Buscando agendamentos para processar avisos...");
 
         // Configurações da Evolution
-        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+        const LINK_CLOUDFLARE = "https://evolution-api-aagv.onrender.com"; 
         const API_KEY_EVO = "Ja997640401";
         const nomeDaInstancia = "KingAgenda";
 
@@ -1957,7 +1957,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
         console.log("🔄 [CRON-AUSENTES] Iniciando varredura de clientes sumidos...");
 
         // Configurações da Evolution API
-        const LINK_CLOUDFLARE = "https://evolution-king-agenda.onrender.com"; 
+        const LINK_CLOUDFLARE = "https://evolution-api-aagv.onrender.com"; 
         const API_KEY_EVO = "Ja997640401";
         const nomeDaInstancia = "KingAgenda";
 
@@ -2227,7 +2227,8 @@ app.get('/cron/verificar-inauguracao', async (req, res) => {
 // 🚀 ROTA MÁGICA: DESLIGAR A TRAVA DO EVOLUTION (@LID)
 // ============================================================
 app.get('/desligar-trava', async (req, res) => {
-    const urlEvo = `https://evolution-king-agenda.onrender.com/settings/set/KingAgenda`;
+    // 👇 AQUI: Atualizado para a nova URL da Evolution
+    const urlEvo = `https://evolution-api-aagv.onrender.com/settings/set/KingAgenda`;
     const API_KEY_EVO = "Ja997640401";
     
     try {
