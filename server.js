@@ -2023,7 +2023,7 @@ app.get('/cron/clientes-ausentes', async (req, res) => {
                     if (userData.ultimoAlertaAusente === hojeStr) continue;
 
                     // Mensagem de marketing
-                    const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? CC ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte com o profissional *${dadosCorte.barbeiroNome}* na *${dadosCorte.nomeBarbearia}*.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
+                    const mensagemResgate = `Olá, *${dadosCorte.clienteNome}*! Tudo bem? CC ✂️\n\nReparamos aqui no sistema do *King Agenda* que já faz mais de 25 dias desde o seu último corte na nossa barbearia.\n\nO tempo voa e o visual já deve estar precisando daquele talento, hein? Que tal dar uma olhadinha nos horários livres dessa semana e já garantir a sua vaga? Abra o aplicativo e agende em poucos cliques! 💈🏃‍♂️`;
 
                     // CORRIGIDO PARA 'telefone'
                     let numLimpo = telefone.split('@')[0].replace(/[^0-9]/g, '');
